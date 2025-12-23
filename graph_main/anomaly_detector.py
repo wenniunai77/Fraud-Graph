@@ -20,9 +20,10 @@ class AnomalyDetector:
     基于GraphMAE的重建误差进行无监督异常检测
     """
     
-    def __init__(self, model, config: AnomalyConfig):
+    def __init__(self, model, config: AnomalyConfig, device=None):
         self.model = model
         self.config = config
+        self.device = device
         
         self.node_scores = None
         self.edge_scores = None

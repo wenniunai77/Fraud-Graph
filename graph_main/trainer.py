@@ -11,7 +11,7 @@ from typing import Optional, Dict, Tuple
 import torch
 import torch.nn as nn
 
-from config import Config, TrainConfig
+from config import MainConfig, TrainConfig
 from models import GraphMAE, create_optimizer, get_current_lr, set_random_seed
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
@@ -181,7 +181,7 @@ class Trainer:
 def train_graphmae(
     model: GraphMAE,
     data,
-    config: Config,
+    config: MainConfig,
     device: torch.device
 ) -> Tuple[GraphMAE, Dict]:
     """
@@ -190,7 +190,7 @@ def train_graphmae(
     Args:
         model: GraphMAE模型
         data: 图数据
-        config: 配置对象
+        config: 主配置对象
         device: 计算设备
     
     Returns:
@@ -200,9 +200,9 @@ def train_graphmae(
     history = trainer.train(data)
     
     # 保存模型
-    if config.train.save_model:
+    if config.save_model:
         checkpoint_path = os.path.join(
-            config.train.checkpoint_path,
+            config.checkpoint_dir,
             'graphmae_checkpoint.pt'
         )
         trainer.save_checkpoint(checkpoint_path)

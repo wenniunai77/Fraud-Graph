@@ -1,34 +1,22 @@
 """
-GraphMAE Fraud Detection Package
+GraphMAE Fraud Detection - Main Module
 
-基于GraphMAE的支付交易欺诈检测系统
+项目结构:
+- preprocess/: 数据预处理模块，将CSV数据转换为图结构
+- main模块: 模型训练、异常检测、可视化
+
+运行流程:
+1. 先运行 preprocess/run_preprocess.py 进行数据预处理
+2. 再运行 run_main.py 进行模型训练和异常检测
 """
 
-__version__ = "1.0.0"
-__author__ = "GraphMAE Fraud Detection Team"
+__version__ = "2.0.0"
 
-from .config import Config, DataConfig, ModelConfig, TrainConfig, AnomalyConfig
-from .data_loader import DataLoader, load_fraud_graph_data
-from .statistics import GraphStatistics, generate_statistics_report
-from .trainer import Trainer, train_graphmae
-from .anomaly_detector import AnomalyDetector, UnsupervisedEvaluator, detect_anomalies
-from .visualization import Visualizer, create_visualizer
+from .config import MainConfig, ModelConfig, TrainConfig, AnomalyConfig
 
 __all__ = [
-    'Config',
-    'DataConfig', 
+    'MainConfig',
     'ModelConfig',
-    'TrainConfig',
-    'AnomalyConfig',
-    'DataLoader',
-    'load_fraud_graph_data',
-    'GraphStatistics',
-    'generate_statistics_report',
-    'Trainer',
-    'train_graphmae',
-    'AnomalyDetector',
-    'UnsupervisedEvaluator',
-    'detect_anomalies',
-    'Visualizer',
-    'create_visualizer'
+    'TrainConfig', 
+    'AnomalyConfig'
 ]

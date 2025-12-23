@@ -1,193 +1,131 @@
 """
-GraphMAE 欺诈检测配置文件
-用于支付交易图数据的无监督异常检测
+GraphMAE 主配置文件 (Main Config)
+用于模型训练和异常检测的配置
 
-字段对应关系（按列索引）：
-第0列: uetr - 交易唯一标识
-第1列: payment_channel - 交易渠道
-第2列: debit_bic_code - 支付方BIC码
-第3列: bene_bic_code - 收款方BIC码
-第4列: evt_tran_stat_cde - 支付状态码
-第5列: instructed_currency - 客户指定币种
-第6列: instructed_amount - 客户指定金额
-第7列: payment_currency - 银行使用币种
-第8列: payment_amount - 银行使用金额
-第9列: credit_currency - 收款方接收币种
-第10列: credit_amount - 收款方接收金额
-第11列: txn_dt - 事件发生时间
-第12列: tds_dt - 入库时间戳
-第13列: mop - 付款方式
-第14列: debit_account_masked - 支付方账户(masked)
-第15列: bene_account_masked - 收款方账户(masked)
+注意: 数据预处理相关配置已移至 preprocess/config.py
+运行流程: 先运行 preprocess/run_preprocess.py -> 再运行 run_main.py
 """
 
 import os
 from dataclasses import dataclass, field
-from typing import List, Optional
-
-
-@dataclass
-class DataConfig:
-    """数据配置"""
-    # 数据路径
-    data_path: str = ""
-    
-    # 列索引定义（不使用列名，使用索引）
-    col_uetr: int = 0                    # 交易唯一标识
-    col_payment_channel: int = 1         # 交易渠道
-    col_debit_bic_code: int = 2          # 支付方BIC码
-    col_bene_bic_code: int = 3           # 收款方BIC码
-    col_evt_tran_stat_cde: int = 4       # 支付状态码
-    col_instructed_currency: int = 5     # 客户指定币种
-    col_instructed_amount: int = 6       # 客户指定金额
-    col_payment_currency: int = 7        # 银行使用币种
-    col_payment_amount: int = 8          # 银行使用金额
-    col_credit_currency: int = 9         # 收款方接收币种
-    col_credit_amount: int = 10          # 收款方接收金额
-    col_txn_dt: int = 11                 # 事件发生时间
-    col_tds_dt: int = 12                 # 入库时间戳
-    col_mop: int = 13                    # 付款方式
-    col_debit_account_masked: int = 14   # 支付方账户
-    col_bene_account_masked: int = 15    # 收款方账户
-    
-    # 图构建配置
-    # 源节点列（支付方账户）
-    src_col: int = 14
-    # 目标节点列（收款方账户）  
-    dst_col: int = 15
-    
-    # 数值特征列索引
-    numerical_cols: List[int] = field(default_factory=lambda: [6, 8, 10])  # 金额相关列
-    
-    # 类别特征列索引
-    categorical_cols: List[int] = field(default_factory=lambda: [1, 2, 3, 4, 5, 7, 9, 13])
-    
-    # 时间特征列索引
-    time_cols: List[int] = field(default_factory=lambda: [11, 12])
-    
-    # 采样配置
-    use_full_dataset: bool = False
-    sample_size: int = 500000
-    
-    # 输出目录
-    output_dir: str = "./output"
+from typing import Optional, List
 
 
 @dataclass
 class ModelConfig:
     """模型配置"""
-    # 编码器配置
-    encoder_type: str = "gat"  # 'gat', 'gcn', 'gin'
-    decoder_type: str = "gat"  # 'gat', 'gcn', 'mlp'
     
-    # 隐藏层配置
-    hidden_channels: int = 256
-    out_channels: int = 128
-    num_layers: int = 2
+    # ========== 编码器配置 ==========
+    encoder_type: str = "gat"      # 编码器类型: 'gat', 'gcn'
+    decoder_type: str = "gat"      # 解码器类型: 'gat', 'gcn', 'mlp'
     
-    # GAT特定配置
-    num_heads: int = 4
-    num_out_heads: int = 1
-    concat_hidden: bool = False
+    # ========== 网络结构配置 ==========
+    hidden_channels: int = 256     # 隐藏层维度
+    out_channels: int = 128        # 输出嵌入维度
+    num_layers: int = 2            # GNN层数
+    decoder_layers: int = 1        # 解码器MLP层数
     
-    # 正则化配置
-    dropout: float = 0.2
-    attn_drop: float = 0.1
-    negative_slope: float = 0.2
+    # ========== GAT特定配置 ==========
+    num_heads: int = 4             # 注意力头数
+    num_out_heads: int = 1         # 输出层注意力头数
+    concat_hidden: bool = False    # 是否拼接隐藏层
     
-    # 残差连接和归一化
-    residual: bool = False
-    norm: Optional[str] = None  # 'layernorm', 'batchnorm', None
+    # ========== 正则化配置 ==========
+    dropout: float = 0.2           # Dropout率
+    attn_drop: float = 0.1         # 注意力Dropout
+    negative_slope: float = 0.2    # LeakyReLU负斜率
     
-    # 激活函数
-    activation: str = "prelu"
+    # ========== 掩码配置 ==========
+    mask_rate: float = 0.5         # 掩码比例
+    replace_rate: float = 0.1      # 随机替换比例
+    
+    # ========== 损失函数配置 ==========
+    loss_fn: str = "sce"           # 损失函数: 'sce', 'mse'
+    alpha_l: float = 2.0           # SCE损失的alpha参数
 
 
-@dataclass
+@dataclass  
 class TrainConfig:
     """训练配置"""
-    # 训练参数
-    epochs: int = 500
-    lr: float = 0.001
-    weight_decay: float = 1e-5
     
-    # 掩码策略
-    mask_rate: float = 0.5
-    replace_rate: float = 0.1
-    drop_edge_rate: float = 0.0
+    # ========== 优化器配置 ==========
+    optimizer: str = "adam"        # 优化器类型: 'adam', 'sgd', 'adamw'
+    lr: float = 0.001              # 学习率
+    weight_decay: float = 1e-5     # L2正则化权重
     
-    # 损失函数
-    loss_fn: str = "sce"  # 'sce', 'mse'
-    alpha_l: float = 2.0  # SCE损失的alpha参数
+    # ========== 训练配置 ==========
+    epochs: int = 500              # 最大训练轮数
+    patience: int = 20             # 早停耐心值
     
-    # 优化器
-    optimizer: str = "adam"
-    use_scheduler: bool = True
+    # ========== 学习率调度器 ==========
+    use_scheduler: bool = True     # 是否使用学习率调度器
+    scheduler: str = "plateau"      # 调度器类型: 'plateau', 'cosine', 'none'
+    scheduler_patience: int = 10   # 调度器耐心值
+    scheduler_factor: float = 0.5  # 学习率衰减因子
     
-    # 早停
-    patience: int = 20
-    
-    # 设备
-    device: int = 0  # -1 for CPU, >= 0 for GPU
-    
-    # 随机种子
-    seeds: List[int] = field(default_factory=lambda: [42])
-    
-    # 保存和加载
-    save_model: bool = True
-    load_model: bool = False
-    checkpoint_path: str = "./checkpoints"
-    
-    # 日志
-    logging: bool = True
-    log_interval: int = 10
+    # ========== 其他 ==========
+    grad_clip: float = 1.0         # 梯度裁剪
+    val_interval: int = 5          # 验证间隔
+    log_interval: int = 10         # 日志间隔
 
 
 @dataclass
 class AnomalyConfig:
     """异常检测配置"""
-    # 节点异常分数采样次数
-    num_samples: int = 10
     
-    # 边异常检测策略
-    edge_score_strategy: str = "max"  # 'max', 'mean', 'sum'
+    # ========== 异常分数计算 ==========
+    edge_score_strategy: str = "max"    # 边异常分数策略: 'max', 'mean', 'sum'
+    num_samples: int = 10               # 节点异常分数采样次数
     
-    # 异常阈值（百分位数）
-    threshold_percentile: float = 95.0
+    # ========== 阈值设置 ==========
+    threshold_percentile: float = 95.0  # 异常阈值百分位数
     
-    # Top-K分析
+    # ========== Top-K分析 ==========
     top_k_values: List[int] = field(default_factory=lambda: [10, 20, 50, 100, 200, 500])
 
 
 @dataclass
-class Config:
-    """总配置类"""
-    data: DataConfig = field(default_factory=DataConfig)
+class MainConfig:
+    """主配置"""
+    
+    # ========== 路径配置 ==========
+    preprocessed_dir: str = "./preprocess/preprocessed_data"  # 预处理数据目录
+    output_dir: str = "./output"                              # 输出目录
+    checkpoint_dir: str = "./checkpoints"                     # 模型检查点目录
+    
+    # ========== 子配置 ==========
     model: ModelConfig = field(default_factory=ModelConfig)
     train: TrainConfig = field(default_factory=TrainConfig)
     anomaly: AnomalyConfig = field(default_factory=AnomalyConfig)
     
-    def __post_init__(self):
-        """确保输出目录存在"""
-        os.makedirs(self.data.output_dir, exist_ok=True)
-        os.makedirs(self.train.checkpoint_path, exist_ok=True)
-
-
-def get_default_config() -> Config:
-    """获取默认配置"""
-    return Config()
-
-
-def load_config_from_dict(config_dict: dict) -> Config:
-    """从字典加载配置"""
-    data_config = DataConfig(**config_dict.get('data', {}))
-    model_config = ModelConfig(**config_dict.get('model', {}))
-    train_config = TrainConfig(**config_dict.get('train', {}))
-    anomaly_config = AnomalyConfig(**config_dict.get('anomaly', {}))
+    # ========== 设备配置 ==========
+    device: int = 0                 # GPU设备ID，-1表示CPU
+    seed: int = 42                  # 随机种子
     
-    return Config(
-        data=data_config,
-        model=model_config,
-        train=train_config,
-        anomaly=anomaly_config
-    )
+    # ========== 输出控制 ==========
+    save_model: bool = True         # 是否保存模型
+    visualize: bool = True          # 是否生成可视化
+    verbose: bool = True            # 是否详细输出
+    
+    # ========== 预处理文件名 ==========
+    graph_data_file: str = "graph_data.pt"
+    node_mapping_file: str = "node_mapping.pkl"
+    statistics_file: str = "statistics.json"
+    
+    def get_preprocessed_path(self, filename: str) -> str:
+        """获取预处理文件路径"""
+        return os.path.join(self.preprocessed_dir, filename)
+    
+    def get_output_path(self, filename: str) -> str:
+        """获取输出文件路径"""
+        return os.path.join(self.output_dir, filename)
+    
+    def ensure_dirs(self):
+        """确保所有目录存在"""
+        os.makedirs(self.output_dir, exist_ok=True)
+        os.makedirs(self.checkpoint_dir, exist_ok=True)
+
+
+def get_default_config() -> MainConfig:
+    """获取默认配置"""
+    return MainConfig()
