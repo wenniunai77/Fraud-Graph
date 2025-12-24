@@ -1,7 +1,3 @@
-"""
-模型模块初始化文件
-"""
-
 from .graphmae import GraphMAE, build_model
 from .encoder import (
     create_encoder, 

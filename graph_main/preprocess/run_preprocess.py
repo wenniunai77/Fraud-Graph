@@ -1,11 +1,3 @@
-"""
-预处理主运行脚本
-运行此脚本完成数据预处理，生成图数据供main部分使用
-
-使用方法:
-    python run_preprocess.py --data_path /path/to/data.csv --output_dir ./preprocessed_data
-"""
-
 import os
 import sys
 import json
@@ -13,7 +5,6 @@ import argparse
 import logging
 from datetime import datetime
 
-# 添加当前目录到路径
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import PreprocessConfig
@@ -29,34 +20,13 @@ logging.basicConfig(
 
 
 def run_preprocess(config: PreprocessConfig) -> dict:
-    """
-    运行完整预处理流程
-    
-    流程:
-    1. 加载CSV数据
-    2. 构建边特征（包含time_diff）
-    3. 创建节点映射和边索引
-    4. 聚合节点特征
-    5. 构建PyG图数据
-    6. 计算统计信息
-    7. 保存所有数据和元信息
-    
-    Args:
-        config: 预处理配置对象
-        
-    Returns:
-        预处理元信息字典
-    """
     logging.info("=" * 80)
-    logging.info("开始数据预处理 (Preprocessing Start)")
+    logging.info("Preprocessing Start")
     logging.info("=" * 80)
     
     start_time = datetime.now()
-    
-    # 确保输出目录存在
     config.ensure_output_dir()
     
-    # 收集所有元信息（用于preprocess_check.ipynb检查）
     preprocess_meta = {
         "run_time": start_time.strftime("%Y-%m-%d %H:%M:%S"),
         "config": {
@@ -68,11 +38,8 @@ def run_preprocess(config: PreprocessConfig) -> dict:
         "steps": {}
     }
     
-    # ========================================
-    # Step 1: 数据加载
-    # ========================================
     logging.info("\n" + "=" * 40)
-    logging.info("Step 1: 数据加载 (Data Loading)")
+    logging.info("Step 1: Data Loading")
     logging.info("=" * 40)
     
     loader = DataLoader(config)
@@ -81,11 +48,8 @@ def run_preprocess(config: PreprocessConfig) -> dict:
     
     preprocess_meta["steps"]["data_loading"] = loader.get_meta_info()
     
-    # ========================================
-    # Step 2: 特征工程 - 边特征
-    # ========================================
     logging.info("\n" + "=" * 40)
-    logging.info("Step 2: 特征工程 - 边特征 (Edge Features)")
+    logging.info("Step 2: Feature Engineering - Edge Features")
     logging.info("=" * 40)
     
     feature_engineer = FeatureEngineer(config)
@@ -93,11 +57,8 @@ def run_preprocess(config: PreprocessConfig) -> dict:
     
     preprocess_meta["steps"]["edge_features"] = feature_engineer.get_meta_info()
     
-    # ========================================
-    # Step 3: 图构建 - 节点映射和边索引
-    # ========================================
     logging.info("\n" + "=" * 40)
-    logging.info("Step 3: 图构建 (Graph Construction)")
+    logging.info("Step 3: Graph Construction")
     logging.info("=" * 40)
     
     graph_builder = GraphBuilder(config)
@@ -106,11 +67,8 @@ def run_preprocess(config: PreprocessConfig) -> dict:
     
     preprocess_meta["steps"]["graph_building"] = graph_builder.get_meta_info()
     
-    # ========================================
-    # Step 4: 特征工程 - 节点特征聚合
-    # ========================================
     logging.info("\n" + "=" * 40)
-    logging.info("Step 4: 节点特征聚合 (Node Feature Aggregation)")
+    logging.info("Step 4: Node Feature Aggregation")
     logging.info("=" * 40)
     
     node_features, node_feature_names = feature_engineer.build_node_features(
@@ -122,11 +80,8 @@ def run_preprocess(config: PreprocessConfig) -> dict:
         "feature_names": node_feature_names
     }
     
-    # ========================================
-    # Step 5: 构建PyG图数据对象
-    # ========================================
     logging.info("\n" + "=" * 40)
-    logging.info("Step 5: 构建PyG图数据 (Build PyG Data)")
+    logging.info("Step 5: Build PyG Data")
     logging.info("=" * 40)
     
     data = graph_builder.build_pyg_data(
@@ -136,11 +91,8 @@ def run_preprocess(config: PreprocessConfig) -> dict:
         add_self_loop=True
     )
     
-    # ========================================
-    # Step 6: 统计分析
-    # ========================================
     logging.info("\n" + "=" * 40)
-    logging.info("Step 6: 统计分析 (Statistics Analysis)")
+    logging.info("Step 6: Statistics Analysis")
     logging.info("=" * 40)
     
     stats_analyzer = GraphStatistics(config)
@@ -151,22 +103,16 @@ def run_preprocess(config: PreprocessConfig) -> dict:
     
     preprocess_meta["steps"]["statistics"] = statistics
     
-    # ========================================
-    # Step 7: 保存数据
-    # ========================================
     logging.info("\n" + "=" * 40)
-    logging.info("Step 7: 保存数据 (Save Data)")
+    logging.info("Step 7: Save Data")
     logging.info("=" * 40)
     
-    # 保存图数据
     graph_builder.save_graph_data(
         data, node_feature_names, edge_feature_names
     )
     
-    # 保存统计信息
     stats_analyzer.save_statistics()
     
-    # 保存预处理元信息（用于检查）
     end_time = datetime.now()
     preprocess_meta["duration_seconds"] = (end_time - start_time).total_seconds()
     preprocess_meta["success"] = True
@@ -175,68 +121,63 @@ def run_preprocess(config: PreprocessConfig) -> dict:
     with open(meta_path, 'w', encoding='utf-8') as f:
         json.dump(preprocess_meta, f, indent=2, ensure_ascii=False, default=str)
     
-    logging.info(f"\n预处理元信息已保存到: {meta_path}")
+    logging.info(f"\nPreprocess meta saved to: {meta_path}")
     
-    # ========================================
-    # 完成
-    # ========================================
     logging.info("\n" + "=" * 80)
-    logging.info("预处理完成 (Preprocessing Complete)")
+    logging.info("Preprocessing Complete")
     logging.info("=" * 80)
-    logging.info(f"耗时: {preprocess_meta['duration_seconds']:.2f} 秒")
-    logging.info(f"输出目录: {config.output_dir}")
-    logging.info(f"\n输出文件:")
-    logging.info(f"  - {config.graph_data_file}: PyG图数据")
-    logging.info(f"  - {config.node_features_file}: 节点特征")
-    logging.info(f"  - {config.edge_features_file}: 边特征")
-    logging.info(f"  - {config.edge_index_file}: 边索引")
-    logging.info(f"  - {config.node_mapping_file}: 节点映射")
-    logging.info(f"  - {config.statistics_file}: 统计信息")
-    logging.info(f"  - {config.preprocess_meta_file}: 预处理元信息")
+    logging.info(f"Duration: {preprocess_meta['duration_seconds']:.2f} seconds")
+    logging.info(f"Output directory: {config.output_dir}")
+    logging.info(f"\nOutput files:")
+    logging.info(f"  - {config.graph_data_file}: PyG graph data")
+    logging.info(f"  - {config.node_features_file}: Node features")
+    logging.info(f"  - {config.edge_features_file}: Edge features")
+    logging.info(f"  - {config.edge_index_file}: Edge index")
+    logging.info(f"  - {config.node_mapping_file}: Node mapping")
+    logging.info(f"  - {config.statistics_file}: Statistics")
+    logging.info(f"  - {config.preprocess_meta_file}: Preprocess meta")
     
-    logging.info("\n✅ 请在 preprocess_check.ipynb 中检查预处理结果!")
+    logging.info("\nPlease check preprocessing results in preprocess_check.ipynb!")
     
     return preprocess_meta
 
 
 def main():
-    """主函数"""
-    parser = argparse.ArgumentParser(description="GraphMAE 数据预处理")
+    parser = argparse.ArgumentParser(description="GraphMAE Data Preprocessing")
     
     parser.add_argument(
         "--data_path", 
         type=str, 
         required=True,
-        help="原始CSV数据文件路径"
+        help="Path to raw CSV data file"
     )
     parser.add_argument(
         "--output_dir", 
         type=str, 
         default="./preprocessed_data",
-        help="预处理输出目录 (default: ./preprocessed_data)"
+        help="Preprocessing output directory (default: ./preprocessed_data)"
     )
     parser.add_argument(
         "--sample_size", 
         type=int, 
-        default=500000,
-        help="采样大小，0表示使用全量数据 (default: 500000)"
+        default=0,
+        help="Sample size, 0 means full dataset (default: 0)"
     )
     parser.add_argument(
         "--src_col", 
         type=int, 
         default=14,
-        help="源节点列索引（支付方账户）(default: 14)"
+        help="Source node column index (payer account) (default: 14)"
     )
     parser.add_argument(
         "--dst_col", 
         type=int, 
         default=15,
-        help="目标节点列索引（收款方账户）(default: 15)"
+        help="Target node column index (payee account) (default: 15)"
     )
     
     args = parser.parse_args()
     
-    # 创建配置
     config = PreprocessConfig()
     config.data_path = args.data_path
     config.output_dir = args.output_dir
@@ -249,7 +190,6 @@ def main():
         config.use_full_dataset = False
         config.sample_size = args.sample_size
     
-    # 运行预处理
     run_preprocess(config)
 
 

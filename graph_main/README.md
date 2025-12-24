@@ -1,54 +1,57 @@
-# GraphMAE 欺诈检测项目
+# GraphMAE Fraud Detection Project
 
-基于 GraphMAE (Graph Masked Autoencoder) 的支付交易欺诈检测系统。
+A payment transaction fraud detection system based on GraphMAE (Graph Masked Autoencoder).
 
-## 项目结构
+## Project Structure
 
-项目分为两大部分：
+The project is divided into two parts:
 
 ```
 graph_main/
-├── preprocess/                    # 【Part 1】数据预处理模块
-│   ├── config.py                  # 预处理配置
-│   ├── data_loader.py             # 数据加载
-│   ├── feature_engineer.py        # 特征工程（包含time_diff特征）
-│   ├── graph_builder.py           # 图构建
-│   ├── statistics.py              # 统计分析
-│   ├── run_preprocess.py          # 预处理主脚本
-│   └── preprocess_check.ipynb     # 预处理检查notebook
+├── preprocess/                    # [Part 1] Data Preprocessing Module
+│   ├── config.py                  # Preprocessing configuration
+│   ├── data_loader.py             # Data loading
+│   ├── feature_engineer.py        # Feature engineering (including time_diff)
+│   ├── graph_builder.py           # Graph construction
+│   ├── statistics.py              # Statistical analysis
+│   ├── run_preprocess.py          # Preprocessing main script
+│   ├── preprocess_check.ipynb     # Preprocessing check notebook
+│   └── __init__.py                # Module exports
 │
-├── config.py                      # 【Part 2】主程序配置
-├── models/                        # 模型定义
-│   ├── graphmae.py               # GraphMAE模型
-│   ├── encoder.py                # 编码器（GAT/GCN）
-│   └── loss_func.py              # 损失函数（SCE）
-├── trainer.py                     # 训练器
-├── anomaly_detector.py           # 异常检测器
-├── visualization.py              # 可视化
-└── run_main.py                   # 主程序脚本
+├── config.py                      # [Part 2] Main program configuration
+├── models/                        # Model definitions
+│   ├── graphmae.py               # GraphMAE model
+│   ├── encoder.py                # Encoder (GAT/GCN)
+│   ├── loss_func.py              # Loss function (SCE)
+│   └── utils.py                  # Utility functions
+├── trainer.py                     # Trainer
+├── anomaly_detector.py           # Anomaly detector
+├── visualization.py              # Visualization
+├── run_main.py                   # Main program script
+└── __init__.py                   # Module exports
 ```
 
-## 运行流程
+## Running Process
 
-### 必须按顺序运行：
+### Must be run in order:
 
-**Step 1: 数据预处理**
+**Step 1: Data Preprocessing**
 ```bash
 cd graph_main/preprocess
 python run_preprocess.py \
     --data_path /path/to/your/data.csv \
     --output_dir ./preprocessed_data \
-    --sample_size 500000
+    --sample_size 0  # 0 means full dataset, or specify sample size e.g. 500000
 ```
 
-**Step 2: 检查预处理结果（可选但推荐）**
+**Step 2: Check Preprocessing Results (Optional but Recommended)**
 
-在 Jupyter 中打开 `preprocess/preprocess_check.ipynb`，运行所有单元格检查：
-- fillna 情况
-- time_diff 特征是否成功构造
-- 数据质量检查
+Open `preprocess/preprocess_check.ipynb` in Jupyter and run all cells to check:
+- fillna status
+- time_diff feature construction success
+- Data quality check
 
-**Step 3: 运行主程序**
+**Step 3: Run Main Program**
 ```bash
 cd graph_main
 python run_main.py \
@@ -58,86 +61,85 @@ python run_main.py \
     --device 0
 ```
 
-## 特征说明
+## Feature Description
 
-### 边特征 (Edge Features)
+### Edge Features
 
-| 特征名 | 来源列 | 含义 |
-|--------|--------|------|
-| instructed_amount | 第6列 | 客户指定金额 |
-| payment_amount | 第8列 | 银行使用金额 |
-| credit_amount | 第10列 | 收款方接收金额 |
-| payment_channel_encoded | 第1列 | 交易渠道编码 |
-| debit_bic_code_encoded | 第2列 | 支付方BIC码编码 |
-| bene_bic_code_encoded | 第3列 | 收款方BIC码编码 |
-| evt_tran_stat_cde_encoded | 第4列 | 支付状态码编码 |
-| instructed_currency_encoded | 第5列 | 客户指定币种编码 |
-| payment_currency_encoded | 第7列 | 银行使用币种编码 |
-| credit_currency_encoded | 第9列 | 收款方接收币种编码 |
-| mop_encoded | 第13列 | 付款方式编码 |
-| txn_hour | 第11列 | 交易发生小时 |
-| txn_day_of_week | 第11列 | 交易发生星期几 |
-| txn_day_of_month | 第11列 | 交易发生日期 |
-| tds_hour | 第12列 | 入库小时 |
-| tds_day_of_week | 第12列 | 入库星期几 |
-| tds_day_of_month | 第12列 | 入库日期 |
-| **time_diff_seconds** | 第12-11列 | **时间差 (tds_dt - txn_dt)** |
+| Feature Name | Source Column | Description |
+|--------------|---------------|-------------|
+| instructed_amount | Column 6 | Customer specified amount |
+| payment_amount | Column 8 | Bank used amount |
+| credit_amount | Column 10 | Beneficiary received amount |
+| payment_channel_encoded | Column 1 | Transaction channel encoding |
+| debit_bic_code_encoded | Column 2 | Payer BIC code encoding |
+| bene_bic_code_encoded | Column 3 | Beneficiary BIC code encoding |
+| instructed_currency_encoded | Column 5 | Customer specified currency encoding |
+| payment_currency_encoded | Column 7 | Bank used currency encoding |
+| credit_currency_encoded | Column 9 | Beneficiary received currency encoding |
+| mop_encoded | Column 13 | Method of payment encoding |
+| txn_hour | Column 11 | Transaction hour |
+| txn_day_of_week | Column 11 | Transaction day of week |
+| txn_day_of_month | Column 11 | Transaction day of month |
+| tds_hour | Column 12 | Storage hour |
+| tds_day_of_week | Column 12 | Storage day of week |
+| tds_day_of_month | Column 12 | Storage day of month |
+| **time_diff_seconds** | Column 12-11 | **Time difference (tds_dt - txn_dt)** |
 
-### 节点特征 (Node Features)
+### Node Features
 
-| 特征名 | 含义 |
-|--------|------|
-| src_avg_feat_* | 作为发送方时，各边特征的平均值 |
-| dst_avg_feat_* | 作为接收方时，各边特征的平均值 |
-| src_tx_count | 出度：作为发送方的交易次数 |
-| dst_tx_count | 入度：作为接收方的交易次数 |
-| total_degree | 总度数 |
-| in_out_ratio | 入出度比值 |
+| Feature Name | Description |
+|--------------|-------------|
+| src_avg_feat_* | Average of edge features when acting as sender |
+| dst_avg_feat_* | Average of edge features when acting as receiver |
+| src_tx_count | Out-degree: number of transactions as sender |
+| dst_tx_count | In-degree: number of transactions as receiver |
+| total_degree | Total degree |
+| in_out_ratio | In/out degree ratio |
 
-## 输出文件
+## Output Files
 
-### 预处理输出 (`preprocess/preprocessed_data/`)
-- `graph_data.pt`: PyG图数据对象
-- `node_features.pt`: 节点特征
-- `edge_features.pt`: 边特征
-- `edge_index.pt`: 边索引
-- `node_mapping.pkl`: 节点映射
-- `statistics.json`: 统计信息
-- `preprocess_meta.json`: 预处理元信息（用于检查）
+### Preprocessing Output (`preprocess/preprocessed_data/`)
+- `graph_data.pt`: PyG graph data object
+- `node_features.pt`: Node features
+- `edge_features.pt`: Edge features
+- `edge_index.pt`: Edge index
+- `node_mapping.pkl`: Node mapping
+- `statistics.json`: Statistics information
+- `preprocess_meta.json`: Preprocessing metadata (for checking)
 
-### 主程序输出 (`output/`)
-- `graphmae_model.pt`: 训练好的模型
-- `anomaly_results.json`: 异常检测结果
-- `comprehensive_report.png`: 综合可视化报告
-- `embeddings_tsne.png`: t-SNE可视化
+### Main Program Output (`output/`)
+- `graphmae_model.pt`: Trained model
+- `anomaly_results.json`: Anomaly detection results
+- `comprehensive_report.png`: Comprehensive visualization report
+- `embeddings_tsne.png`: t-SNE visualization
 
-## 依赖安装
+## Dependencies Installation
 
 ```bash
 pip install torch torch_geometric torch_scatter
 pip install pandas numpy scikit-learn matplotlib seaborn
 ```
 
-## 关键参数说明
+## Key Parameters Description
 
-### 预处理参数
-- `--sample_size`: 采样大小，0表示全量数据
-- `--src_col`: 源节点列索引（默认14，支付方账户）
-- `--dst_col`: 目标节点列索引（默认15，收款方账户）
+### Preprocessing Parameters
+- `--sample_size`: Sample size, 0 means full dataset
+- `--src_col`: Source node column index (default 14, payer account)
+- `--dst_col`: Target node column index (default 15, beneficiary account)
 
-### 模型参数
-- `--encoder_type`: 编码器类型 (gat/gcn)
-- `--hidden_channels`: 隐藏层维度
-- `--num_layers`: GNN层数
-- `--mask_rate`: 掩码比例
-- `--epochs`: 训练轮数
-- `--patience`: 早停耐心值
+### Model Parameters
+- `--encoder_type`: Encoder type (gat/gcn)
+- `--hidden_channels`: Hidden layer dimension
+- `--num_layers`: Number of GNN layers
+- `--mask_rate`: Mask ratio
+- `--epochs`: Training epochs
+- `--patience`: Early stopping patience
 
-## 检查点
+## Checkpoint
 
-预处理完成后，务必运行 `preprocess_check.ipynb` 检查：
+After preprocessing, be sure to run `preprocess_check.ipynb` to verify:
 
-1. ✅ fillna 情况：哪些列被填充了缺失值
-2. ✅ time_diff 构造：时间差特征是否成功计算
-3. ✅ 数据质量：是否有NaN、Inf等异常值
-4. ✅ 特征分布：特征分布是否合理
+1. ✅ fillna status: which columns were filled with missing values
+2. ✅ time_diff construction: whether time difference feature was calculated successfully
+3. ✅ Data quality: whether there are NaN, Inf or other abnormal values
+4. ✅ Feature distribution: whether feature distribution is reasonable

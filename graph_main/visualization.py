@@ -1,8 +1,3 @@
-"""
-可视化模块
-用于训练过程可视化和异常检测结果可视化
-"""
-
 import logging
 import numpy as np
 from typing import Dict, List, Optional, Tuple
@@ -21,10 +16,6 @@ logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=lo
 
 
 class Visualizer:
-    """
-    可视化工具类
-    """
-    
     def __init__(self, output_dir: str = "./output"):
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
@@ -38,14 +29,6 @@ class Visualizer:
         title: str = "Training Loss Curve",
         save_path: Optional[str] = None
     ):
-        """
-        绘制训练损失曲线
-        
-        Args:
-            train_losses: 训练损失列表
-            title: 图表标题
-            save_path: 保存路径
-        """
         if not HAS_MATPLOTLIB:
             return
         
@@ -70,20 +53,11 @@ class Visualizer:
         title: str = "Anomaly Score Distribution",
         save_path: Optional[str] = None
     ):
-        """
-        绘制异常分数分布
-        
-        Args:
-            scores: 异常分数数组
-            title: 图表标题
-            save_path: 保存路径
-        """
         if not HAS_MATPLOTLIB:
             return
         
         fig, axes = plt.subplots(1, 2, figsize=(14, 5))
         
-        # 直方图
         ax = axes[0]
         ax.hist(scores, bins=50, alpha=0.7, color='steelblue', edgecolor='black')
         ax.set_xlabel('Anomaly Score')
@@ -96,7 +70,6 @@ class Visualizer:
         ax.legend()
         ax.grid(True, alpha=0.3)
         
-        # 箱线图
         ax = axes[1]
         bp = ax.boxplot(scores, vert=True)
         ax.set_ylabel('Anomaly Score')
@@ -120,15 +93,6 @@ class Visualizer:
         title: str = "Node Degree vs Anomaly Score",
         save_path: Optional[str] = None
     ):
-        """
-        绘制节点度数与异常分数的关系
-        
-        Args:
-            node_degrees: 节点度数数组
-            node_scores: 节点异常分数数组
-            title: 图表标题
-            save_path: 保存路径
-        """
         if not HAS_MATPLOTLIB:
             return
         
@@ -155,15 +119,6 @@ class Visualizer:
         title: str = "Top Anomalies",
         save_path: Optional[str] = None
     ):
-        """
-        绘制Top异常
-        
-        Args:
-            top_indices: 异常索引
-            top_scores: 异常分数
-            title: 图表标题
-            save_path: 保存路径
-        """
         if not HAS_MATPLOTLIB:
             return
         
@@ -178,7 +133,6 @@ class Visualizer:
         ax.set_title(f'{title} (Top {k})')
         ax.grid(True, alpha=0.3, axis='y')
         
-        # 只显示部分标签
         if k > 20:
             step = k // 10
             ax.set_xticks(x[::step])
@@ -200,17 +154,6 @@ class Visualizer:
         title: str = "Node Embeddings (t-SNE)",
         save_path: Optional[str] = None
     ):
-        """
-        绘制节点嵌入的t-SNE可视化
-        
-        Args:
-            embeddings: 节点嵌入矩阵
-            scores: 异常分数（用于着色）
-            labels: 标签（可选）
-            sample_size: 采样大小
-            title: 图表标题
-            save_path: 保存路径
-        """
         if not HAS_MATPLOTLIB:
             return
         
@@ -220,18 +163,15 @@ class Visualizer:
             logging.warning("sklearn not available. t-SNE visualization skipped.")
             return
         
-        # 采样
         n_samples = min(sample_size, len(embeddings))
         indices = np.random.choice(len(embeddings), n_samples, replace=False)
         emb_sample = embeddings[indices]
         
         logging.info(f"Performing t-SNE on {n_samples} nodes...")
         
-        # t-SNE降维
         tsne = TSNE(n_components=2, random_state=42, perplexity=30, n_iter=1000)
         emb_2d = tsne.fit_transform(emb_sample)
         
-        # 绘图
         fig, ax = plt.subplots(figsize=(10, 8))
         
         if scores is not None:
@@ -269,23 +209,11 @@ class Visualizer:
         title: str = "GraphMAE Fraud Detection Report",
         save_path: Optional[str] = None
     ):
-        """
-        绘制综合报告图
-        
-        Args:
-            train_losses: 训练损失
-            node_scores: 节点异常分数
-            edge_scores: 边异常分数
-            node_degrees: 节点度数
-            title: 图表标题
-            save_path: 保存路径
-        """
         if not HAS_MATPLOTLIB:
             return
         
         fig, axes = plt.subplots(2, 3, figsize=(18, 10))
         
-        # 1. 训练损失
         ax = axes[0, 0]
         ax.plot(train_losses, label='Train Loss', linewidth=2, color='steelblue')
         ax.set_xlabel('Epoch')
@@ -294,7 +222,6 @@ class Visualizer:
         ax.legend()
         ax.grid(True, alpha=0.3)
         
-        # 2. 节点异常分数分布
         ax = axes[0, 1]
         ax.hist(node_scores, bins=50, alpha=0.7, color='purple', edgecolor='black')
         ax.set_xlabel('Anomaly Score')
@@ -305,7 +232,6 @@ class Visualizer:
         ax.legend()
         ax.grid(True, alpha=0.3)
         
-        # 3. 边异常分数分布
         ax = axes[0, 2]
         ax.hist(edge_scores, bins=50, alpha=0.7, color='coral', edgecolor='black')
         ax.set_xlabel('Anomaly Score')
@@ -316,7 +242,6 @@ class Visualizer:
         ax.legend()
         ax.grid(True, alpha=0.3)
         
-        # 4. 度数vs分数
         ax = axes[1, 0]
         ax.scatter(node_degrees, node_scores, alpha=0.3, s=10, c='coral')
         ax.set_xlabel('Node Degree')
@@ -325,7 +250,6 @@ class Visualizer:
         ax.set_xscale('log')
         ax.grid(True, alpha=0.3)
         
-        # 5. 分位数统计
         ax = axes[1, 1]
         percentiles = [50, 75, 90, 95, 99]
         node_pcts = [np.percentile(node_scores, p) for p in percentiles]
@@ -343,7 +267,6 @@ class Visualizer:
         ax.legend()
         ax.grid(True, alpha=0.3, axis='y')
         
-        # 6. 统计摘要
         ax = axes[1, 2]
         ax.axis('off')
         
@@ -388,5 +311,4 @@ class Visualizer:
 
 
 def create_visualizer(output_dir: str = "./output") -> Visualizer:
-    """创建可视化器的便捷函数"""
     return Visualizer(output_dir)
