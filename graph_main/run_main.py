@@ -117,8 +117,13 @@ def run_main(config: MainConfig):
     total_params = sum(p.numel() for p in model.parameters())
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     logging.info(f"Model built:")
+    logging.info(f"  - Encoder: {config.model.encoder_type}")
+    logging.info(f"  - Decoder: {config.model.decoder_type}")
     logging.info(f"  - Total parameters: {total_params:,}")
     logging.info(f"  - Trainable parameters: {trainable_params:,}")
+    
+    run_output_dir = config.create_run_output_dir()
+    logging.info(f"  - Output directory: {run_output_dir}")
     
     logging.info("\n" + "=" * 40)
     logging.info("Step 3: Train Model")
@@ -133,7 +138,7 @@ def run_main(config: MainConfig):
     logging.info(f"  - Best loss: {history['best_loss']:.6f}")
     
     if config.save_model:
-        model_path = config.get_output_path("graphmae_model.pt")
+        model_path = os.path.join(run_output_dir, "graphmae_model.pt")
         torch.save(model.state_dict(), model_path)
         logging.info(f"Model saved: {model_path}")
     
@@ -164,6 +169,8 @@ def run_main(config: MainConfig):
         logging.info(f"  {i+1}. Transaction {top_indices[i]}: score {top_scores[i]:.6f}")
     
     results = {
+        "encoder_type": config.model.encoder_type,
+        "decoder_type": config.model.decoder_type,
         "node_scores": node_scores.tolist(),
         "edge_scores": edge_scores.tolist(),
         "top_anomaly_indices": top_indices.tolist(),
@@ -178,7 +185,7 @@ def run_main(config: MainConfig):
         }
     }
     
-    results_path = config.get_output_path("anomaly_results.json")
+    results_path = os.path.join(run_output_dir, "anomaly_results.json")
     with open(results_path, 'w', encoding='utf-8') as f:
         json.dump(results, f, indent=2)
     logging.info(f"Anomaly detection results saved: {results_path}")
@@ -197,21 +204,21 @@ def run_main(config: MainConfig):
         except:
             node_degrees = np.ones(data.num_nodes)
         
-        visualizer = Visualizer(config.output_dir)
+        visualizer = Visualizer(run_output_dir)
         
         visualizer.plot_comprehensive_report(
             train_losses=history['train_losses'],
             node_scores=node_scores,
             edge_scores=edge_scores,
             node_degrees=node_degrees,
-            save_path=config.get_output_path("comprehensive_report.png")
+            save_path=os.path.join(run_output_dir, "comprehensive_report.png")
         )
         
         visualizer.plot_embeddings_tsne(
             embeddings=node_embeddings,
             scores=node_scores,
             sample_size=min(3000, len(node_scores)),
-            save_path=config.get_output_path("embeddings_tsne.png")
+            save_path=os.path.join(run_output_dir, "embeddings_tsne.png")
         )
         
         logging.info("Visualization complete")
@@ -223,14 +230,15 @@ def run_main(config: MainConfig):
     logging.info("Main Program Complete")
     logging.info("=" * 80)
     logging.info(f"Total duration: {duration:.2f} seconds")
-    logging.info(f"Output directory: {config.output_dir}")
+    logging.info(f"Run output directory: {run_output_dir}")
     
     return {
         "history": history,
         "node_scores": node_scores,
         "edge_scores": edge_scores,
         "node_embeddings": node_embeddings,
-        "top_anomalies": (top_indices, top_scores)
+        "top_anomalies": (top_indices, top_scores),
+        "run_output_dir": run_output_dir
     }
 
 
@@ -240,7 +248,7 @@ def main():
     parser.add_argument(
         "--preprocessed_dir", 
         type=str, 
-        default="./preprocess/preprocessed_data",
+        default="./processed_data",
         help="Preprocessed data directory"
     )
     parser.add_argument(

@@ -26,7 +26,7 @@ class ColumnIndex:
 @dataclass
 class PreprocessConfig:
     data_path: str = ""
-    output_dir: str = "./preprocessed_data"
+    output_dir: str = "../processed_data"
     col_idx: ColumnIndex = field(default_factory=ColumnIndex)
     src_col: int = 14
     dst_col: int = 15

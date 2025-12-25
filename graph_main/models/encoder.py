@@ -34,24 +34,33 @@ class PyGGATEncoder(nn.Module):
         self.norms = nn.ModuleList()
         self.activations = nn.ModuleList()
         
-        self.convs.append(GATConv(
-            in_channels, hidden_channels, heads=num_heads,
-            concat=True, dropout=attn_drop,
-            negative_slope=negative_slope
-        ))
-        self.norms.append(create_norm(norm)(hidden_channels * num_heads) if norm else nn.Identity())
-        self.activations.append(create_activation(activation))
-        
-        for _ in range(num_layers - 2):
+        if num_layers == 1:
+            last_activation = create_activation(activation) if encoding else nn.Identity()
             self.convs.append(GATConv(
-                hidden_channels * num_heads, hidden_channels, heads=num_heads,
+                in_channels, out_channels, heads=1,
+                concat=False, dropout=attn_drop,
+                negative_slope=negative_slope
+            ))
+            self.norms.append(create_norm(norm)(out_channels) if norm and encoding else nn.Identity())
+            self.activations.append(last_activation)
+        else:
+            self.convs.append(GATConv(
+                in_channels, hidden_channels, heads=num_heads,
                 concat=True, dropout=attn_drop,
                 negative_slope=negative_slope
             ))
             self.norms.append(create_norm(norm)(hidden_channels * num_heads) if norm else nn.Identity())
             self.activations.append(create_activation(activation))
-        
-        if num_layers > 1:
+            
+            for _ in range(num_layers - 2):
+                self.convs.append(GATConv(
+                    hidden_channels * num_heads, hidden_channels, heads=num_heads,
+                    concat=True, dropout=attn_drop,
+                    negative_slope=negative_slope
+                ))
+                self.norms.append(create_norm(norm)(hidden_channels * num_heads) if norm else nn.Identity())
+                self.activations.append(create_activation(activation))
+            
             last_activation = create_activation(activation) if encoding else nn.Identity()
             self.convs.append(GATConv(
                 hidden_channels * num_heads, out_channels, heads=1,
@@ -107,16 +116,21 @@ class PyGGCNEncoder(nn.Module):
         self.norms = nn.ModuleList()
         self.activations = nn.ModuleList()
         
-        self.convs.append(GCNConv(in_channels, hidden_channels))
-        self.norms.append(create_norm(norm)(hidden_channels) if norm else nn.Identity())
-        self.activations.append(create_activation(activation))
-        
-        for _ in range(num_layers - 2):
-            self.convs.append(GCNConv(hidden_channels, hidden_channels))
+        if num_layers == 1:
+            last_activation = create_activation(activation) if encoding else nn.Identity()
+            self.convs.append(GCNConv(in_channels, out_channels))
+            self.norms.append(create_norm(norm)(out_channels) if norm and encoding else nn.Identity())
+            self.activations.append(last_activation)
+        else:
+            self.convs.append(GCNConv(in_channels, hidden_channels))
             self.norms.append(create_norm(norm)(hidden_channels) if norm else nn.Identity())
             self.activations.append(create_activation(activation))
-        
-        if num_layers > 1:
+            
+            for _ in range(num_layers - 2):
+                self.convs.append(GCNConv(hidden_channels, hidden_channels))
+                self.norms.append(create_norm(norm)(hidden_channels) if norm else nn.Identity())
+                self.activations.append(create_activation(activation))
+            
             last_activation = create_activation(activation) if encoding else nn.Identity()
             self.convs.append(GCNConv(hidden_channels, out_channels))
             self.norms.append(create_norm(norm)(out_channels) if norm and encoding else nn.Identity())

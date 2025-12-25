@@ -180,7 +180,9 @@ class GraphMAE(nn.Module):
         with torch.no_grad():
             if x is None:
                 x = data.x
-            enc_rep = self.encoder(x, data.edge_index)
+            enc_rep, all_hidden = self.encoder(x, data.edge_index, return_hidden=True)
+            if self.concat_hidden:
+                enc_rep = torch.cat(all_hidden, dim=1)
         
         return enc_rep
     
@@ -195,7 +197,9 @@ class GraphMAE(nn.Module):
                 x = data.x
             edge_index = data.edge_index
             
-            enc_rep = self.encoder(x, edge_index)
+            enc_rep, all_hidden = self.encoder(x, edge_index, return_hidden=True)
+            if self.concat_hidden:
+                enc_rep = torch.cat(all_hidden, dim=1)
             rep = self.encoder_to_decoder(enc_rep)
             
             if self._decoder_type in ("mlp", "linear"):
@@ -229,10 +233,14 @@ class GraphMAE(nn.Module):
             for _ in range(num_samples):
                 masked_x, (mask_nodes, _) = self.encoding_mask_noise(x, self.mask_rate)
                 
-                enc_rep = self.encoder(masked_x, edge_index)
+                enc_rep, all_hidden = self.encoder(masked_x, edge_index, return_hidden=True)
+                if self.concat_hidden:
+                    enc_rep = torch.cat(all_hidden, dim=1)
                 
                 rep = self.encoder_to_decoder(enc_rep)
-                rep[mask_nodes] = 0
+                
+                if self._decoder_type not in ("mlp", "linear"):
+                    rep[mask_nodes] = 0
                 
                 if self._decoder_type in ("mlp", "linear"):
                     recon = self.decoder(rep)

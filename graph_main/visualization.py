@@ -169,7 +169,7 @@ class Visualizer:
         
         logging.info(f"Performing t-SNE on {n_samples} nodes...")
         
-        tsne = TSNE(n_components=2, random_state=42, perplexity=30, n_iter=1000)
+        tsne = TSNE(n_components=2, random_state=42, perplexity=30, max_iter=1000)
         emb_2d = tsne.fit_transform(emb_sample)
         
         fig, ax = plt.subplots(figsize=(10, 8))

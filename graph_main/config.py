@@ -59,7 +59,7 @@ class AnomalyConfig:
 
 @dataclass
 class MainConfig:
-    preprocessed_dir: str = "./preprocess/preprocessed_data"
+    preprocessed_dir: str = "./processed_data"
     output_dir: str = "./output"
     checkpoint_dir: str = "./checkpoints"
     
@@ -83,6 +83,14 @@ class MainConfig:
     
     def get_output_path(self, filename: str) -> str:
         return os.path.join(self.output_dir, filename)
+    
+    def create_run_output_dir(self) -> str:
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        run_name = f"{self.model.encoder_type}_{self.model.decoder_type}_{timestamp}"
+        run_output_dir = os.path.join(self.output_dir, run_name)
+        os.makedirs(run_output_dir, exist_ok=True)
+        return run_output_dir
     
     def ensure_dirs(self):
         os.makedirs(self.output_dir, exist_ok=True)
