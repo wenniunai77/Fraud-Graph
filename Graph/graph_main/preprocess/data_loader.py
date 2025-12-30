@@ -43,10 +43,14 @@ class DataLoader:
         
         self.raw_shape = self.df.shape
         
+        # Filter transactions where sender and receiver accounts are the same
+        self._filter_same_account_transactions()
+        
         self.meta_info["load_info"] = {
             "file_path": path,
             "raw_rows": self.raw_shape[0],
             "raw_cols": self.raw_shape[1],
+            "filtered_rows": self.df.shape[0],
             "use_full_dataset": self.config.use_full_dataset,
             "sample_size": self.config.sample_size if not self.config.use_full_dataset else None,
             "column_names": list(self.df.columns)
@@ -71,6 +75,32 @@ class DataLoader:
             raise ValueError("Data not loaded! Please call load_csv() first")
         
         return self.df.iloc[:, col_indices]
+    
+    def _filter_same_account_transactions(self):
+        """Filter transactions where sender and receiver accounts are the same"""
+        if self.df is None:
+            return
+        
+        src_col = self.config.src_col
+        dst_col = self.config.dst_col
+        
+        before_count = len(self.df)
+        
+        # Find records where sender and receiver accounts are the same
+        same_account_mask = self.df.iloc[:, src_col] == self.df.iloc[:, dst_col]
+        removed_count = same_account_mask.sum()
+        
+        # Filter out these records
+        self.df = self.df[~same_account_mask].reset_index(drop=True)
+        
+        after_count = len(self.df)
+        
+        if removed_count > 0:
+            logging.info(f"Filtered same-account transactions: removed {removed_count:,} records "
+                        f"({removed_count/before_count*100:.2f}%), "
+                        f"remaining {after_count:,} records")
+        else:
+            logging.info("No same-account transactions found")
     
     def _check_missing_values(self):
         if self.df is None:

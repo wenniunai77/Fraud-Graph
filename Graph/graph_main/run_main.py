@@ -43,7 +43,7 @@ def load_preprocessed_data(config: MainConfig):
     if not os.path.exists(graph_path):
         raise FileNotFoundError(f"Graph data file not found: {graph_path}")
     
-    data = torch.load(graph_path)
+    data = torch.load(graph_path, weights_only=False)
     logging.info(f"  - Graph data loaded: {data.num_nodes} nodes, {data.edge_index.shape[1]} edges")
     
     mapping_path = config.get_preprocessed_path(config.node_mapping_file)
@@ -107,11 +107,19 @@ def run_main(config: MainConfig):
         decoder_type=config.model.decoder_type,
         num_layers=config.model.num_layers,
         num_heads=config.model.num_heads,
+        num_out_heads=config.model.num_out_heads,
         dropout=config.model.dropout,
+        attn_drop=config.model.attn_drop,
+        negative_slope=config.model.negative_slope,
+        residual=config.model.residual,
+        norm=config.model.norm,
+        activation=config.model.activation,
         mask_rate=config.model.mask_rate,
         replace_rate=config.model.replace_rate,
+        drop_edge_rate=config.model.drop_edge_rate,
         loss_fn=config.model.loss_fn,
-        alpha_l=config.model.alpha_l
+        alpha_l=config.model.alpha_l,
+        concat_hidden=config.model.concat_hidden
     ).to(device)
     
     total_params = sum(p.numel() for p in model.parameters())
@@ -258,7 +266,8 @@ def main():
         help="Output directory"
     )
     
-    parser.add_argument("--encoder_type", type=str, default="gat", help="Encoder type")
+    parser.add_argument("--encoder_type", type=str, default="gat", help="Encoder type (gat, gcn)")
+    parser.add_argument("--decoder_type", type=str, default="gat", help="Decoder type (gat, gcn, mlp, linear)")
     parser.add_argument("--hidden_channels", type=int, default=256, help="Hidden layer dimension")
     parser.add_argument("--out_channels", type=int, default=128, help="Output dimension")
     parser.add_argument("--num_layers", type=int, default=2, help="Number of GNN layers")
@@ -286,6 +295,7 @@ def main():
     config.save_model = not args.no_save
     
     config.model.encoder_type = args.encoder_type
+    config.model.decoder_type = args.decoder_type
     config.model.hidden_channels = args.hidden_channels
     config.model.out_channels = args.out_channels
     config.model.num_layers = args.num_layers

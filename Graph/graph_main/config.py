@@ -21,8 +21,13 @@ class ModelConfig:
     attn_drop: float = 0.1
     negative_slope: float = 0.2
     
+    residual: bool = False
+    norm: Optional[str] = None
+    activation: str = "prelu"
+    
     mask_rate: float = 0.5
     replace_rate: float = 0.1
+    drop_edge_rate: float = 0.0
     
     loss_fn: str = "sce"
     alpha_l: float = 2.0

@@ -1,3 +1,6 @@
+"""
+图构建模块
+"""
 import logging
 import numpy as np
 import pandas as pd
@@ -6,11 +9,12 @@ import pickle
 import json
 import os
 from typing import Dict, Tuple, Optional, Any
-from datetime import datetime
 
 from torch_geometric.data import Data
 from torch_geometric.utils import add_self_loops, degree
 
+import sys
+sys.path.append('..')
 from config import PreprocessConfig
 
 logging.basicConfig(
@@ -20,6 +24,7 @@ logging.basicConfig(
 
 
 class GraphBuilder:
+    """图构建器"""
     
     def __init__(self, config: PreprocessConfig):
         self.config = config
@@ -32,7 +37,8 @@ class GraphBuilder:
         }
     
     def create_node_mapping(self, df: pd.DataFrame) -> Tuple[Dict[str, int], int]:
-        logging.info("Creating node mapping...")
+        """创建节点映射"""
+        logging.info("创建节点映射...")
         
         src_col = self.config.src_col
         dst_col = self.config.dst_col
@@ -61,19 +67,20 @@ class GraphBuilder:
             "bidirectional_accounts": bidirectional
         }
         
-        logging.info(f"Node mapping created:")
-        logging.info(f"  - Total nodes: {self.num_nodes:,}")
-        logging.info(f"  - Source-only accounts: {source_only:,}")
-        logging.info(f"  - Dest-only accounts: {dest_only:,}")
-        logging.info(f"  - Bidirectional accounts: {bidirectional:,}")
+        logging.info(f"节点映射创建完成:")
+        logging.info(f"  - 总节点数: {self.num_nodes:,}")
+        logging.info(f"  - 仅作为源账户: {source_only:,}")
+        logging.info(f"  - 仅作为目标账户: {dest_only:,}")
+        logging.info(f"  - 双向账户: {bidirectional:,}")
         
         return self.node_map, self.num_nodes
     
     def build_edge_index(self, df: pd.DataFrame) -> torch.Tensor:
+        """构建边索引"""
         if not self.node_map:
-            raise ValueError("Please call create_node_mapping() first")
+            raise ValueError("请先调用 create_node_mapping()")
         
-        logging.info("Building edge index...")
+        logging.info("构建边索引...")
         
         src_col = self.config.src_col
         dst_col = self.config.dst_col
@@ -85,9 +92,19 @@ class GraphBuilder:
         
         self.meta_info["graph_info"]["num_edges"] = edge_index.shape[1]
         
-        logging.info(f"Edge index built. Shape: {edge_index.shape}, Edges: {edge_index.shape[1]:,}")
+        logging.info(f"边索引构建完成. Shape: {edge_index.shape}, 边数: {edge_index.shape[1]:,}")
         
         return edge_index
+    
+    def get_node_degrees(self, edge_index: torch.Tensor) -> Tuple[np.ndarray, np.ndarray]:
+        """获取节点度数（in/out）"""
+        src_nodes = edge_index[0].numpy()
+        dst_nodes = edge_index[1].numpy()
+        
+        out_degree = np.bincount(src_nodes, minlength=self.num_nodes)
+        in_degree = np.bincount(dst_nodes, minlength=self.num_nodes)
+        
+        return in_degree, out_degree
     
     def build_pyg_data(
         self,
@@ -96,7 +113,8 @@ class GraphBuilder:
         edge_features: Optional[torch.Tensor] = None,
         add_self_loop: bool = True
     ) -> Data:
-        logging.info("Building PyG Data object...")
+        """构建 PyG Data 对象"""
+        logging.info("构建 PyG Data 对象...")
         
         original_edge_index = edge_index.clone()
         num_original_edges = edge_index.shape[1]
@@ -104,11 +122,12 @@ class GraphBuilder:
         if add_self_loop:
             edge_index_with_loops, _ = add_self_loops(edge_index, num_nodes=self.num_nodes)
             num_edges_with_loops = edge_index_with_loops.shape[1]
-            logging.info(f"Added self loops: {num_original_edges:,} -> {num_edges_with_loops:,} edges")
+            logging.info(f"添加自环: {num_original_edges:,} -> {num_edges_with_loops:,} 边")
         else:
             edge_index_with_loops = edge_index
             num_edges_with_loops = num_original_edges
         
+        # 计算边权重（归一化）
         row, col = edge_index_with_loops
         deg = degree(row, self.num_nodes, dtype=torch.float)
         deg_inv_sqrt = deg.pow(-0.5)
@@ -137,68 +156,68 @@ class GraphBuilder:
             "has_edge_attr": edge_features is not None
         })
         
-        logging.info(f"PyG Data object built:")
-        logging.info(f"  - Nodes: {data.num_nodes:,}")
-        logging.info(f"  - Edges (with self loops): {data.edge_index.shape[1]:,}")
-        logging.info(f"  - Node feature dim: {data.x.shape[1]}")
+        logging.info(f"PyG Data 对象构建完成:")
+        logging.info(f"  - 节点数: {data.num_nodes:,}")
+        logging.info(f"  - 边数（含自环）: {data.edge_index.shape[1]:,}")
+        logging.info(f"  - 节点特征维度: {data.x.shape[1]}")
         if edge_features is not None:
-            logging.info(f"  - Edge feature dim: {edge_features.shape[1]}")
+            logging.info(f"  - 边特征维度: {edge_features.shape[1]}")
         
         return data
     
     def save_graph_data(
         self,
         data: Data,
-        node_feature_names: list,
-        edge_feature_names: list,
-        output_dir: Optional[str] = None
+        output_dir: str,
+        save_components: bool = True
     ):
-        output_dir = output_dir or self.config.output_dir
+        """保存图数据"""
         os.makedirs(output_dir, exist_ok=True)
         
-        logging.info(f"Saving graph data to {output_dir}...")
-        
-        graph_path = os.path.join(output_dir, self.config.graph_data_file)
+        # 保存完整图数据
+        graph_path = os.path.join(output_dir, "graph_data.pt")
         torch.save(data, graph_path)
-        logging.info(f"  - Graph data: {graph_path}")
+        logging.info(f"图数据已保存: {graph_path}")
         
-        mapping_path = os.path.join(output_dir, self.config.node_mapping_file)
-        with open(mapping_path, 'wb') as f:
+        if save_components:
+            # 保存节点特征
+            torch.save(data.x, os.path.join(output_dir, "node_features.pt"))
+            # 保存边索引
+            torch.save(data.edge_index, os.path.join(output_dir, "edge_index.pt"))
+            # 保存原始边索引
+            torch.save(data.original_edge_index, os.path.join(output_dir, "original_edge_index.pt"))
+            # 保存边特征
+            if data.edge_attr is not None:
+                torch.save(data.edge_attr, os.path.join(output_dir, "edge_features.pt"))
+        
+        # 保存节点映射
+        with open(os.path.join(output_dir, "node_mapping.pkl"), 'wb') as f:
             pickle.dump({
-                'node_map': self.node_map,
-                'reverse_node_map': self.reverse_node_map
+                "node_map": self.node_map,
+                "reverse_node_map": self.reverse_node_map
             }, f)
-        logging.info(f"  - Node mapping: {mapping_path}")
         
-        torch.save(data.x, os.path.join(output_dir, self.config.node_features_file))
-        torch.save(data.original_edge_index, os.path.join(output_dir, self.config.edge_index_file))
-        if hasattr(data, 'edge_attr') and data.edge_attr is not None:
-            torch.save(data.edge_attr, os.path.join(output_dir, self.config.edge_features_file))
+        # 保存元信息
+        with open(os.path.join(output_dir, "graph_meta.json"), 'w') as f:
+            json.dump(self.meta_info, f, indent=2)
         
-        logging.info("Graph data saved")
+        logging.info(f"所有图数据组件已保存到: {output_dir}")
+    
+    def load_graph_data(self, data_dir: str) -> Data:
+        """加载图数据"""
+        graph_path = os.path.join(data_dir, "graph_data.pt")
+        data = torch.load(graph_path)
+        
+        # 加载节点映射
+        with open(os.path.join(data_dir, "node_mapping.pkl"), 'rb') as f:
+            mapping = pickle.load(f)
+            self.node_map = mapping["node_map"]
+            self.reverse_node_map = mapping["reverse_node_map"]
+            self.num_nodes = len(self.node_map)
+        
+        logging.info(f"图数据已加载: {graph_path}")
+        return data
     
     def get_meta_info(self) -> Dict[str, Any]:
+        """获取元信息"""
         return self.meta_info
-    
-    def get_node_id(self, account: str) -> Optional[int]:
-        return self.node_map.get(str(account))
-    
-    def get_account(self, node_id: int) -> Optional[str]:
-        return self.reverse_node_map.get(node_id)
-
-
-def load_graph_data(output_dir: str, config: PreprocessConfig) -> Tuple[Data, Dict]:
-    logging.info(f"Loading graph data from {output_dir}...")
-    
-    graph_path = os.path.join(output_dir, config.graph_data_file)
-    data = torch.load(graph_path)
-    
-    mapping_path = os.path.join(output_dir, config.node_mapping_file)
-    with open(mapping_path, 'rb') as f:
-        mapping = pickle.load(f)
-    
-    logging.info(f"Graph data loaded:")
-    logging.info(f"  - Nodes: {data.num_nodes:,}")
-    logging.info(f"  - Edges: {data.edge_index.shape[1]:,}")
-    
-    return data, mapping

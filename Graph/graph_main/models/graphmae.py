@@ -66,7 +66,16 @@ class GraphMAE(nn.Module):
             encoding=True
         )
         
-        dec_in_dim = out_channels * num_layers if concat_hidden else out_channels
+        if concat_hidden:
+            if encoder_type == "gat" and num_layers > 1:
+                dec_in_dim = hidden_channels * num_heads * (num_layers - 1) + out_channels
+            elif encoder_type == "gcn":
+                dec_in_dim = hidden_channels * (num_layers - 1) + out_channels if num_layers > 1 else out_channels
+            else:
+                dec_in_dim = out_channels * num_layers
+        else:
+            dec_in_dim = out_channels
+        
         self.encoder_to_decoder = nn.Linear(dec_in_dim, out_channels, bias=False)
         
         if decoder_type in ("mlp", "linear"):
@@ -164,8 +173,24 @@ class GraphMAE(nn.Module):
         else:
             recon = self.decoder(rep, edge_index)
         
+        if recon.shape[1] != x.shape[1]:
+            import logging
+            logging.error(f"Decoder output dimension mismatch!")
+            logging.error(f"  Expected (from x): {x.shape[1]}")
+            logging.error(f"  Got (from decoder): {recon.shape[1]}")
+            logging.error(f"  Encoder: {self._encoder_type}, Decoder: {self._decoder_type}")
+            logging.error(f"  in_channels: {self.in_channels}, out_channels: {self.out_channels}")
+            raise RuntimeError(f"Decoder output shape {recon.shape} doesn't match input shape {x.shape}")
+        
         x_init = x[mask_nodes]
         x_rec = recon[mask_nodes]
+        
+        if x_rec.shape != x_init.shape:
+            import logging
+            logging.error(f"Dimension mismatch! x_rec: {x_rec.shape}, x_init: {x_init.shape}")
+            logging.error(f"Encoder type: {self._encoder_type}, Decoder type: {self._decoder_type}")
+            logging.error(f"in_channels: {self.in_channels}, out_channels: {self.out_channels}")
+            raise RuntimeError(f"Dimension mismatch in forward: x_rec {x_rec.shape} vs x_init {x_init.shape}")
         
         loss = self.criterion(x_rec, x_init)
         
@@ -276,7 +301,6 @@ class GraphMAE(nn.Module):
 
 def build_model(config) -> GraphMAE:
     model_config = config.model
-    train_config = config.train
     
     model = GraphMAE(
         in_channels=config.num_features,
@@ -293,11 +317,11 @@ def build_model(config) -> GraphMAE:
         residual=model_config.residual,
         norm=model_config.norm,
         activation=model_config.activation,
-        mask_rate=train_config.mask_rate,
-        replace_rate=train_config.replace_rate,
-        drop_edge_rate=train_config.drop_edge_rate,
-        loss_fn=train_config.loss_fn,
-        alpha_l=train_config.alpha_l,
+        mask_rate=model_config.mask_rate,
+        replace_rate=model_config.replace_rate,
+        drop_edge_rate=model_config.drop_edge_rate,
+        loss_fn=model_config.loss_fn,
+        alpha_l=model_config.alpha_l,
         concat_hidden=model_config.concat_hidden
     )
     
