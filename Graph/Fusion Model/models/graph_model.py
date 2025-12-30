@@ -226,14 +226,18 @@ class GraphAnomalyDetector:
                 self.optimizer,
                 mode='min',
                 factor=self.train_config.scheduler_factor,
-                patience=self.train_config.scheduler_patience,
-                verbose=True
+                patience=self.train_config.scheduler_patience
             )
+            logging.info("学习率调度器已启用 (ReduceLROnPlateau)")
         
         logging.info(f"GraphMAE 模型已构建. 参数量: {sum(p.numel() for p in self.model.parameters()):,}")
     
     def train(self, data):
-        """训练模型"""
+        """训练模型
+        
+        Returns:
+            List[float]: 每个epoch的训练损失
+        """
         if self.model is None:
             self.build_model(data.x.shape[1])
         
@@ -241,8 +245,13 @@ class GraphAnomalyDetector:
         
         best_loss = float('inf')
         patience_counter = 0
+        train_losses = []  # 记录训练损失
         
         logging.info(f"开始训练 GraphMAE (epochs={self.train_config.epochs})...")
+        
+        # 记录初始学习率
+        current_lr = self.optimizer.param_groups[0]['lr']
+        logging.info(f"初始学习率: {current_lr:.6f}")
         
         for epoch in range(self.train_config.epochs):
             self.model.train()
@@ -250,6 +259,9 @@ class GraphAnomalyDetector:
             
             loss, _ = self.model(data)
             loss.backward()
+            
+            # 记录损失
+            train_losses.append(loss.item())
             
             # 梯度裁剪
             if self.train_config.grad_clip > 0:
@@ -261,7 +273,13 @@ class GraphAnomalyDetector:
             self.optimizer.step()
             
             if self.scheduler:
+                old_lr = self.optimizer.param_groups[0]['lr']
                 self.scheduler.step(loss)
+                new_lr = self.optimizer.param_groups[0]['lr']
+                
+                # 如果学习率发生变化，记录日志
+                if new_lr != old_lr:
+                    logging.info(f"  Epoch {epoch+1}: 学习率从 {old_lr:.6f} 降低到 {new_lr:.6f}")
             
             # Early stopping
             if loss.item() < best_loss:
@@ -278,6 +296,8 @@ class GraphAnomalyDetector:
                 logging.info(f"  Epoch {epoch+1}/{self.train_config.epochs}, Loss: {loss.item():.6f}")
         
         logging.info(f"GraphMAE 训练完成. Best loss: {best_loss:.6f}")
+        
+        return train_losses
     
     def compute_node_scores(self, data) -> np.ndarray:
         """计算节点异常分数（重构误差）"""

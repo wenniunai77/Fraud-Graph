@@ -28,6 +28,18 @@ from preprocess import DataLoader, FeatureEngineer, GraphBuilder
 from models import TabularAnomalyDetector, GraphAnomalyDetector
 from fusion import create_fusion_strategy, analyze_fusion, print_fusion_report
 from evaluation import UnsupervisedEvaluator
+from visualization import (
+    plot_score_distributions,
+    plot_score_scatter,
+    plot_topk_overlap,
+    plot_fusion_weights,
+    create_summary_dashboard,
+    # 新增: 模型贡献分析可视化
+    plot_model_contribution_analysis,
+    plot_degree_contribution_analysis,
+    plot_anomaly_source_heatmap,
+    plot_training_comparison
+)
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s", 
@@ -87,14 +99,36 @@ class FusionPipeline:
         # 特征工程
         self.feature_engineer = FeatureEngineer(self.preprocess_config)
         
-        # 构建表格特征
-        self.tabular_features = self.feature_engineer.build_tabular_features(self.df)
+        # 构建表格特征 - 修复: build_tabular_features 返回元组 (features, feature_names)
+        self.tabular_features, tabular_feature_names = self.feature_engineer.build_tabular_features(self.df)
         logging.info(f"表格特征: {self.tabular_features.shape}")
         
-        # 构建图
+        # 构建图 - 修复: GraphBuilder 没有 build_graph 方法，需要分步调用
         self.graph_builder = GraphBuilder(self.preprocess_config)
-        self.graph_data = self.graph_builder.build_graph(self.df)
-        logging.info(f"图数据: {self.graph_data.num_nodes} 节点, {self.graph_data.num_edges} 边")
+        
+        # 1. 创建节点映射
+        node_map, num_nodes = self.graph_builder.create_node_mapping(self.df)
+        
+        # 2. 构建边索引
+        edge_index = self.graph_builder.build_edge_index(self.df)
+        
+        # 3. 构建边特征
+        edge_features, edge_feature_names = self.feature_engineer.build_edge_features(self.df)
+        
+        # 4. 构建节点特征
+        node_features, node_feature_names = self.feature_engineer.build_node_features(
+            edge_features, edge_index, num_nodes, edge_feature_names
+        )
+        
+        # 5. 构建 PyG Data 对象
+        self.graph_data = self.graph_builder.build_pyg_data(
+            node_features=node_features,
+            edge_index=edge_index,
+            edge_features=edge_features,
+            add_self_loop=True
+        )
+        
+        logging.info(f"图数据: {self.graph_data.num_nodes} 节点, {self.graph_data.edge_index.shape[1]} 边")
     
     def train_tabular_model(self):
         """训练表格模型"""
@@ -128,7 +162,8 @@ class FusionPipeline:
             device=device
         )
         
-        self.graph_detector.train(self.graph_data)
+        # 训练并保存训练历史
+        self.graph_train_losses = self.graph_detector.train(self.graph_data)
         
         # 获取边级别分数
         self.graph_scores = self.graph_detector.predict_scores(
@@ -185,8 +220,13 @@ class FusionPipeline:
         self.evaluator = UnsupervisedEvaluator(self.eval_config)
         
         # 添加弱规则
-        amount_col = self.preprocess_config.columns.payment_amount
-        if amount_col in self.df.columns:
+        # 修复: 使用 col_idx 获取列索引，而不是不存在的 columns 属性
+        col_idx = self.preprocess_config.col_idx
+        payment_amount_idx = col_idx.payment_amount
+        
+        # 获取列名
+        if payment_amount_idx < len(self.df.columns):
+            amount_col = self.df.columns[payment_amount_idx]
             # 大额交易规则
             for p in [95, 99]:
                 threshold = np.percentile(self.df[amount_col], p)
@@ -207,6 +247,144 @@ class FusionPipeline:
         self.evaluator.print_report(report)
         
         return report
+    
+    def visualize_results(self, output_dir: str):
+        """可视化结果"""
+        if not self.config.visualize:
+            logging.info("可视化已禁用，跳过")
+            return
+        
+        logging.info("=" * 60)
+        logging.info("步骤 7: 可视化")
+        logging.info("=" * 60)
+        
+        import os
+        vis_dir = os.path.join(output_dir, "visualizations")
+        os.makedirs(vis_dir, exist_ok=True)
+        
+        # 获取节点度数（后续多个可视化需要用到）
+        node_degrees = None
+        if hasattr(self.graph_data, 'edge_index'):
+            edge_index = self.graph_data.edge_index.cpu().numpy()
+            from collections import Counter
+            # 计算每个节点的度数
+            n_nodes = self.graph_data.x.size(0)
+            degree_counter = Counter(edge_index[0].tolist() + edge_index[1].tolist())
+            node_degrees = np.array([degree_counter.get(i, 0) for i in range(n_nodes)])
+            node_degrees = node_degrees[:len(self.fused_scores)]
+        
+        # 1. 分数分布对比图
+        logging.info("绘制分数分布图...")
+        plot_score_distributions(
+            graph_scores=self.graph_scores[:len(self.fused_scores)],
+            tabular_scores=self.tabular_scores[:len(self.fused_scores)],
+            fused_scores=self.fused_scores,
+            save_path=os.path.join(vis_dir, "score_distributions.png")
+        )
+        
+        # 2. 分数散点图
+        logging.info("绘制分数散点图...")
+        plot_score_scatter(
+            graph_scores=self.graph_scores[:len(self.fused_scores)],
+            tabular_scores=self.tabular_scores[:len(self.fused_scores)],
+            fused_scores=self.fused_scores,
+            top_k=self.eval_config.top_k,
+            save_path=os.path.join(vis_dir, "score_scatter.png")
+        )
+        
+        # 3. Top-K 重叠率分析
+        logging.info("绘制 Top-K 重叠率...")
+        plot_topk_overlap(
+            graph_scores=self.graph_scores[:len(self.fused_scores)],
+            tabular_scores=self.tabular_scores[:len(self.fused_scores)],
+            fused_scores=self.fused_scores,
+            k_values=[100, 200, 500, 1000, 2000],
+            save_path=os.path.join(vis_dir, "topk_overlap.png")
+        )
+        
+        # 4. 融合权重分布（如果使用门控融合）
+        if self.fusion_result.fusion_weights is not None:
+            logging.info("绘制融合权重分布...")
+            plot_fusion_weights(
+                weights=self.fusion_result.fusion_weights,
+                node_degrees=node_degrees,
+                save_path=os.path.join(vis_dir, "fusion_weights.png")
+            )
+        
+        # ========== 新增: 模型贡献分析可视化 ==========
+        
+        # 5. 模型贡献分析
+        logging.info("绘制模型贡献分析图...")
+        plot_model_contribution_analysis(
+            graph_scores=self.graph_scores[:len(self.fused_scores)],
+            tabular_scores=self.tabular_scores[:len(self.fused_scores)],
+            fused_scores=self.fused_scores,
+            fusion_weights=self.fusion_result.fusion_weights,
+            top_k=self.eval_config.top_k,
+            save_path=os.path.join(vis_dir, "model_contribution_analysis.png")
+        )
+        
+        # 6. 度数-贡献分析（分析活跃/非活跃节点的模型贡献差异）
+        if node_degrees is not None:
+            logging.info("绘制度数-贡献分析图...")
+            plot_degree_contribution_analysis(
+                graph_scores=self.graph_scores[:len(self.fused_scores)],
+                tabular_scores=self.tabular_scores[:len(self.fused_scores)],
+                fused_scores=self.fused_scores,
+                node_degrees=node_degrees,
+                fusion_weights=self.fusion_result.fusion_weights,
+                degree_threshold=self.fusion_config.degree_threshold,
+                save_path=os.path.join(vis_dir, "degree_contribution_analysis.png")
+            )
+        
+        # 7. 异常来源热力图
+        logging.info("绘制异常来源热力图...")
+        plot_anomaly_source_heatmap(
+            graph_scores=self.graph_scores[:len(self.fused_scores)],
+            tabular_scores=self.tabular_scores[:len(self.fused_scores)],
+            fused_scores=self.fused_scores,
+            top_k=self.eval_config.top_k,
+            save_path=os.path.join(vis_dir, "anomaly_source_heatmap.png")
+        )
+        
+        # 8. 训练过程对比（如果有训练历史）
+        if hasattr(self, 'graph_train_losses') and self.graph_train_losses:
+            logging.info("绘制训练过程对比图...")
+            plot_training_comparison(
+                graph_train_losses=self.graph_train_losses,
+                tabular_train_info=getattr(self, 'tabular_train_info', None),
+                save_path=os.path.join(vis_dir, "training_comparison.png")
+            )
+        
+        # ========== 综合仪表板 ==========
+        
+        # 9. 综合仪表板
+        logging.info("创建综合仪表板...")
+        from evaluation import UnsupervisedEvaluator
+        evaluator = UnsupervisedEvaluator(self.eval_config)
+        df_subset = self.df.iloc[:len(self.fused_scores)]
+        evaluation_report = evaluator.evaluate(
+            df=df_subset,
+            scores=self.fused_scores,
+            top_k=self.eval_config.top_k
+        )
+        
+        create_summary_dashboard(
+            fusion_result=self.fusion_result,
+            evaluation_report=evaluation_report,
+            save_path=os.path.join(vis_dir, "summary_dashboard.png")
+        )
+        
+        logging.info(f"所有可视化结果已保存到: {vis_dir}")
+        logging.info(f"  - score_distributions.png: 分数分布对比")
+        logging.info(f"  - score_scatter.png: 分数散点图")
+        logging.info(f"  - topk_overlap.png: Top-K 重叠率")
+        logging.info(f"  - fusion_weights.png: 融合权重分布")
+        logging.info(f"  - model_contribution_analysis.png: 模型贡献分析 [NEW]")
+        logging.info(f"  - degree_contribution_analysis.png: 度数-贡献分析 [NEW]")
+        logging.info(f"  - anomaly_source_heatmap.png: 异常来源热力图 [NEW]")
+        logging.info(f"  - training_comparison.png: 训练过程对比 [NEW]")
+        logging.info(f"  - summary_dashboard.png: 综合仪表板")
     
     def save_results(self, output_dir: str):
         """保存结果"""
@@ -252,10 +430,10 @@ class FusionPipeline:
         # 保存配置
         config_path = os.path.join(output_dir, "config.json")
         with open(config_path, 'w') as f:
-            # 简化配置输出
+            # 简化配置输出 - 修复属性名称
             config_dict = {
-                "fusion_strategy": self.fusion_config.strategy,
-                "tabular_models": self.tabular_config.use_models,
+                "fusion_strategy": self.fusion_config.strategy,  # 修复: 使用正确的属性名
+                "tabular_model_type": self.tabular_config.model_type,  # 修复: use_models -> model_type
                 "graph_hidden": self.graph_config.hidden_channels,
                 "graph_epochs": self.train_config.epochs,
                 "top_k": self.eval_config.top_k
@@ -275,6 +453,7 @@ class FusionPipeline:
             self.train_graph_model()
             self.fuse_scores()
             self.evaluate()
+            self.visualize_results(output_dir)  # 添加可视化步骤
             self.save_results(output_dir)
             
             end_time = datetime.now()
@@ -326,6 +505,12 @@ def main():
         help="输出 Top-K 异常"
     )
     
+    parser.add_argument(
+        "--no-visualize",
+        action="store_true",
+        help="禁用可视化"
+    )
+    
     args = parser.parse_args()
     
     # 创建配置
@@ -333,6 +518,7 @@ def main():
     config.fusion.strategy = args.strategy
     config.train.epochs = args.epochs
     config.evaluation.top_k = args.top_k
+    config.visualize = not args.no_visualize  # 根据命令行参数设置可视化开关
     
     # 创建并运行流水线
     pipeline = FusionPipeline(config)

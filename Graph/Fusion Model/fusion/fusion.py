@@ -68,12 +68,14 @@ class GatedFusion(FusionStrategy):
         config: FusionConfig,
         alpha_high: float = 0.7,
         alpha_low: float = 0.3,
-        degree_threshold: int = 5
+        degree_threshold: int = 5,
+        use_hard_threshold: bool = False  # 新增: 是否使用硬阈值
     ):
         self.config = config
         self.alpha_high = alpha_high  # 活跃节点的图权重
         self.alpha_low = alpha_low    # 冷启动节点的图权重
         self.degree_threshold = degree_threshold
+        self.use_hard_threshold = use_hard_threshold  # 硬阈值 vs 平滑过渡
     
     def fuse(
         self,
@@ -98,11 +100,35 @@ class GatedFusion(FusionStrategy):
         
         if node_degrees is not None:
             # 基于度数计算动态权重
-            # 使用 sigmoid 函数平滑过渡
-            normalized_degree = node_degrees / (node_degrees.max() + 1e-8)
+            # 方案1: 硬阈值分段（可选择启用）
+            # 方案2: 平滑过渡（当前默认）
             
-            # α 在 alpha_low 到 alpha_high 之间根据度数变化
+            # 统计度数分布
+            unique_degrees = np.unique(node_degrees)
+            logging.info(f"度数分布: min={node_degrees.min()}, max={node_degrees.max()}, "
+                        f"median={np.median(node_degrees):.1f}, mean={node_degrees.mean():.1f}")
+            logging.info(f"度数阈值: {self.degree_threshold}")
+            
+            # 方案2: 平滑过渡（默认，保持原有逻辑）
+            normalized_degree = node_degrees / (node_degrees.max() + 1e-8)
             alpha = self.alpha_low + (self.alpha_high - self.alpha_low) * normalized_degree
+            
+            # 统计活跃/非活跃节点数量（基于阈值）
+            inactive_count = (node_degrees < self.degree_threshold).sum()
+            active_count = (node_degrees >= self.degree_threshold).sum()
+            logging.info(f"节点分类: 非活跃(<{self.degree_threshold})={inactive_count} ({inactive_count/n*100:.1f}%), "
+                        f"活跃(≥{self.degree_threshold})={active_count} ({active_count/n*100:.1f}%)")
+            
+            # 根据配置选择阈值模式
+            if self.use_hard_threshold:
+                # 硬阈值：二元分类
+                alpha = np.where(
+                    node_degrees < self.degree_threshold,
+                    self.alpha_low,   # 度数 < 阈值: 非活跃节点，用低权重
+                    self.alpha_high   # 度数 >= 阈值: 活跃节点，用高权重
+                )
+                logging.info(f"使用硬阈值模式: 非活跃α={self.alpha_low}, 活跃α={self.alpha_high}")
+            # else: 保持上面的平滑过渡逻辑
         else:
             # 如果没有度数信息，使用固定权重
             alpha = np.full(n, (self.alpha_high + self.alpha_low) / 2)
@@ -307,7 +333,8 @@ def create_fusion_strategy(config: FusionConfig) -> FusionStrategy:
             config=config,
             alpha_high=config.alpha_high,
             alpha_low=config.alpha_low,
-            degree_threshold=config.degree_threshold
+            degree_threshold=config.degree_threshold,
+            use_hard_threshold=config.use_hard_threshold  # 新增参数
         )
     elif strategy_type == "weighted":
         return WeightedFusion(

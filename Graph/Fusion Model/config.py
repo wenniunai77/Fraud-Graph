@@ -149,17 +149,19 @@ class TrainConfig:
 class FusionConfig:
     """融合策略配置"""
     # 融合方法: "gated", "weighted", "rank", "max", "consistent"
-    fusion_method: str = "gated"
+    strategy: str = "gated"  # 修改: fusion_method -> strategy，与 fusion.py 保持一致
     
     # 门控融合参数：节点活跃度阈值（degree < threshold 时更依赖表格模型）
-    gated_degree_threshold: int = 3
-    gated_graph_weight_high: float = 0.7  # 高活跃度时图模型权重
-    gated_graph_weight_low: float = 0.3   # 低活跃度时图模型权重
+    degree_threshold: int = 3  # 修改: gated_degree_threshold -> degree_threshold
+    alpha_high: float = 0.7    # 修改: gated_graph_weight_high -> alpha_high
+    alpha_low: float = 0.3     # 修改: gated_graph_weight_low -> alpha_low
+    use_hard_threshold: bool = False  # 新增: True=硬阈值二分类, False=平滑过渡(默认)
     
     # 加权融合参数
-    weighted_graph_weight: float = 0.5
+    fusion_alpha: float = 0.5  # 修改: weighted_graph_weight -> fusion_alpha
     
     # 一致性融合参数
+    consistency_weight: float = 0.3  # 添加: 一致性融合权重
     consistent_threshold_percentile: float = 95.0
     
     # 边异常分数计算策略: "max", "mean", "sum"
@@ -171,10 +173,12 @@ class FusionConfig:
 class EvaluationConfig:
     """无标签评估配置"""
     # Top-K 分析
+    top_k: int = 1000  # 添加: 默认 Top-K 值
     top_k_values: List[int] = field(default_factory=lambda: [50, 100, 200, 500, 1000])
     
     # 稳定性评估
     stability_n_seeds: int = 5
+    stability_k_values: List[int] = field(default_factory=lambda: [100, 500, 1000])  # 添加: 稳定性评估的 K 值列表
     stability_jaccard_k: int = 100
     
     # 弱规则定义（用于命中率评估）
@@ -199,10 +203,10 @@ class FusionMainConfig:
     output_dir: str = "./output"
     checkpoint_dir: str = "./checkpoints"
     
-    # 子配置
+    # 子配置 - 修复变量名以匹配 run_fusion.py 中的使用
     preprocess: PreprocessConfig = field(default_factory=PreprocessConfig)
-    tabular: TabularModelConfig = field(default_factory=TabularModelConfig)
-    graph: GraphModelConfig = field(default_factory=GraphModelConfig)
+    tabular_model: TabularModelConfig = field(default_factory=TabularModelConfig)  # 修改: tabular -> tabular_model
+    graph_model: GraphModelConfig = field(default_factory=GraphModelConfig)         # 修改: graph -> graph_model
     train: TrainConfig = field(default_factory=TrainConfig)
     fusion: FusionConfig = field(default_factory=FusionConfig)
     evaluation: EvaluationConfig = field(default_factory=EvaluationConfig)
