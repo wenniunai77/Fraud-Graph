@@ -6,13 +6,12 @@ import logging
 import numpy as np
 import pandas as pd
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, Callable
+from typing import Dict, List, Optional, Tuple, Callable, TYPE_CHECKING
 from collections import defaultdict
 from scipy import stats
 
-import sys
-sys.path.append('..')
-from config import EvaluationConfig
+if TYPE_CHECKING:
+    from configs import EvaluationConfig
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s", 
@@ -449,7 +448,7 @@ def create_default_weak_rules(
     Returns:
         配置好的 WeakRuleEvaluator
     """
-    from config import EvaluationConfig
+    from configs import EvaluationConfig
     
     config = EvaluationConfig()
     evaluator = WeakRuleEvaluator(config)

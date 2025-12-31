@@ -4,12 +4,11 @@
 import logging
 import pandas as pd
 import numpy as np
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Tuple, Dict, Any, TYPE_CHECKING
 from pathlib import Path
 
-import sys
-sys.path.append('..')
-from config import PreprocessConfig
+if TYPE_CHECKING:
+    from configs import PreprocessConfig
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s", 

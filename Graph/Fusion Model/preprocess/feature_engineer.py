@@ -5,12 +5,11 @@ import logging
 import numpy as np
 import pandas as pd
 import torch
-from typing import Dict, List, Tuple, Any, Optional
+from typing import Dict, List, Tuple, Any, Optional, TYPE_CHECKING
 from sklearn.preprocessing import StandardScaler
 
-import sys
-sys.path.append('..')
-from config import PreprocessConfig
+if TYPE_CHECKING:
+    from configs import PreprocessConfig
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s", 

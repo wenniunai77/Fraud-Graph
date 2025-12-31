@@ -8,14 +8,13 @@ import torch
 import pickle
 import json
 import os
-from typing import Dict, Tuple, Optional, Any
+from typing import Dict, Tuple, Optional, Any, TYPE_CHECKING
 
 from torch_geometric.data import Data
 from torch_geometric.utils import add_self_loops, degree
 
-import sys
-sys.path.append('..')
-from config import PreprocessConfig
+if TYPE_CHECKING:
+    from configs import PreprocessConfig
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s", 

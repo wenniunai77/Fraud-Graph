@@ -1,65 +1,12 @@
 """
-Fusion Model 配置文件
-融合图模型（GraphMAE）与表格无监督模型（IsolationForest/LOF/AutoEncoder）
+训练配置
+用于模型训练、融合和评估
 """
 import os
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-
-# ==================== 数据列索引（与 graph_main 保持一致）====================
-@dataclass
-class ColumnIndex:
-    """数据列索引配置"""
-    uetr: int = 0
-    payment_channel: int = 1
-    debit_bic_code: int = 2
-    bene_bic_code: int = 3
-    evt_tran_stat_cde: int = 4
-    instructed_currency: int = 5
-    instructed_amount: int = 6
-    payment_currency: int = 7
-    payment_amount: int = 8
-    credit_currency: int = 9
-    credit_amount: int = 10
-    txn_dt: int = 11
-    tds_dt: int = 12
-    mop: int = 13
-    debit_account_masked: int = 14
-    bene_account_masked: int = 15
-
-
-# ==================== 预处理配置 ====================
-@dataclass
-class PreprocessConfig:
-    """数据预处理配置"""
-    data_path: str = ""
-    output_dir: str = "./processed_data"
-    
-    col_idx: ColumnIndex = field(default_factory=ColumnIndex)
-    src_col: int = 14  # debit_account_masked
-    dst_col: int = 15  # bene_account_masked
-    
-    # 数值特征列（金额）
-    numerical_cols: List[int] = field(default_factory=lambda: [6, 8, 10])
-    # 类别特征列
-    categorical_cols: List[int] = field(default_factory=lambda: [1, 2, 3, 5, 7, 9, 13])
-    # 时间特征列
-    time_cols: List[int] = field(default_factory=lambda: [11, 12])
-    
-    # 嵌入维度
-    embedding_dim: int = 8
-    
-    # 采样设置
-    use_full_dataset: bool = True
-    sample_size: int = 500000
-    random_seed: int = 42
-    
-    def get_output_path(self, filename: str) -> str:
-        return os.path.join(self.output_dir, filename)
-    
-    def ensure_output_dir(self):
-        os.makedirs(self.output_dir, exist_ok=True)
+from .base_config import ColumnIndex
 
 
 # ==================== 表格模型配置 ====================
@@ -149,19 +96,19 @@ class TrainConfig:
 class FusionConfig:
     """融合策略配置"""
     # 融合方法: "gated", "weighted", "rank", "max", "consistent"
-    strategy: str = "gated"  # 修改: fusion_method -> strategy，与 fusion.py 保持一致
+    strategy: str = "gated"
     
-    # 门控融合参数：节点活跃度阈值（degree < threshold 时更依赖表格模型）
-    degree_threshold: int = 3  # 修改: gated_degree_threshold -> degree_threshold
-    alpha_high: float = 0.7    # 修改: gated_graph_weight_high -> alpha_high
-    alpha_low: float = 0.3     # 修改: gated_graph_weight_low -> alpha_low
-    use_hard_threshold: bool = False  # 新增: True=硬阈值二分类, False=平滑过渡(默认)
+    # 门控融合参数
+    degree_threshold: int = 3
+    alpha_high: float = 0.7
+    alpha_low: float = 0.3
+    use_hard_threshold: bool = False
     
     # 加权融合参数
-    fusion_alpha: float = 0.5  # 修改: weighted_graph_weight -> fusion_alpha
+    fusion_alpha: float = 0.5
     
     # 一致性融合参数
-    consistency_weight: float = 0.3  # 添加: 一致性融合权重
+    consistency_weight: float = 0.3
     consistent_threshold_percentile: float = 95.0
     
     # 边异常分数计算策略: "max", "mean", "sum"
@@ -173,16 +120,15 @@ class FusionConfig:
 class EvaluationConfig:
     """无标签评估配置"""
     # Top-K 分析
-    top_k: int = 1000  # 添加: 默认 Top-K 值
+    top_k: int = 1000
     top_k_values: List[int] = field(default_factory=lambda: [50, 100, 200, 500, 1000])
     
     # 稳定性评估
     stability_n_seeds: int = 5
-    stability_k_values: List[int] = field(default_factory=lambda: [100, 500, 1000])  # 添加: 稳定性评估的 K 值列表
+    stability_k_values: List[int] = field(default_factory=lambda: [100, 500, 1000])
     stability_jaccard_k: int = 100
     
-    # 弱规则定义（用于命中率评估）
-    # 格式: [(feature_name, operator, threshold, description), ...]
+    # 弱规则定义
     weak_rules: List[tuple] = field(default_factory=lambda: [
         ("payment_amount", ">", "p99", "极端大额"),
         ("payment_amount", "<", "p1", "极端小额"),
@@ -194,19 +140,23 @@ class EvaluationConfig:
     threshold_percentiles: List[float] = field(default_factory=lambda: [90.0, 95.0, 99.0, 99.5])
 
 
-# ==================== 主配置 ====================
+# ==================== 训练主配置 ====================
 @dataclass
-class FusionMainConfig:
-    """主配置"""
-    # 路径配置
-    data_path: str = "../graph_main/raw_data/xxx.csv"
+class TrainingMainConfig:
+    """训练主配置"""
+    # 输入路径（预处理输出目录）
+    processed_data_dir: str = "./processed_data"
+    
+    # 输出路径
     output_dir: str = "./output"
     checkpoint_dir: str = "./checkpoints"
     
-    # 子配置 - 修复变量名以匹配 run_fusion.py 中的使用
-    preprocess: PreprocessConfig = field(default_factory=PreprocessConfig)
-    tabular_model: TabularModelConfig = field(default_factory=TabularModelConfig)  # 修改: tabular -> tabular_model
-    graph_model: GraphModelConfig = field(default_factory=GraphModelConfig)         # 修改: graph -> graph_model
+    # 列索引（用于评估时的弱规则）
+    col_idx: ColumnIndex = field(default_factory=ColumnIndex)
+    
+    # 子配置
+    tabular_model: TabularModelConfig = field(default_factory=TabularModelConfig)
+    graph_model: GraphModelConfig = field(default_factory=GraphModelConfig)
     train: TrainConfig = field(default_factory=TrainConfig)
     fusion: FusionConfig = field(default_factory=FusionConfig)
     evaluation: EvaluationConfig = field(default_factory=EvaluationConfig)
@@ -221,14 +171,27 @@ class FusionMainConfig:
     visualize: bool = True
     verbose: bool = True
     
-    def __post_init__(self):
-        self.preprocess.data_path = self.data_path
-        self.preprocess.output_dir = os.path.join(self.output_dir, "processed_data")
+    def get_graph_data_path(self) -> str:
+        """获取图数据路径"""
+        return os.path.join(self.processed_data_dir, "graph_data.pt")
+    
+    def get_tabular_features_path(self) -> str:
+        """获取表格特征路径"""
+        return os.path.join(self.processed_data_dir, "tabular_features.npy")
+    
+    def get_raw_data_path(self) -> str:
+        """获取原始数据路径"""
+        return os.path.join(self.processed_data_dir, "raw_data.pkl")
+    
+    def get_meta_info_path(self) -> str:
+        """获取元信息路径"""
+        return os.path.join(self.processed_data_dir, "preprocess_meta.json")
     
     def get_output_path(self, filename: str) -> str:
+        """获取输出文件路径"""
         return os.path.join(self.output_dir, filename)
     
     def ensure_dirs(self):
+        """确保所有必要目录存在"""
         os.makedirs(self.output_dir, exist_ok=True)
         os.makedirs(self.checkpoint_dir, exist_ok=True)
-        self.preprocess.ensure_output_dir()

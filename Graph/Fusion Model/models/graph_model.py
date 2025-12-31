@@ -6,11 +6,10 @@ import logging
 import numpy as np
 import torch
 import torch.nn as nn
-from typing import Dict, Optional, Tuple, List
+from typing import Dict, Optional, Tuple, List, TYPE_CHECKING
 
-import sys
-sys.path.append('..')
-from config import GraphModelConfig, TrainConfig
+if TYPE_CHECKING:
+    from configs import GraphModelConfig, TrainConfig
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s", 

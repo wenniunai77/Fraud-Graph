@@ -4,16 +4,15 @@
 """
 import logging
 import numpy as np
-from typing import Dict, Optional, Tuple, List
+from typing import Dict, Optional, Tuple, List, TYPE_CHECKING
 from sklearn.ensemble import IsolationForest
 from sklearn.neighbors import LocalOutlierFactor
 from sklearn.preprocessing import StandardScaler
 import torch
 import torch.nn as nn
 
-import sys
-sys.path.append('..')
-from config import TabularModelConfig
+if TYPE_CHECKING:
+    from configs import TabularModelConfig
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s", 
