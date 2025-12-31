@@ -163,30 +163,62 @@ def plot_fusion_weights_analysis(
         degree_threshold: 活跃度阈值
         save_path: 保存路径
     """
+    import logging
+
     fig, axes = plt.subplots(1, 3, figsize=(16, 5))
+
+    # --- 输入标准化/对齐 ---
+    fusion_weights = np.asarray(fusion_weights).reshape(-1)
+    if node_degrees is None:
+        node_degrees_arr: Optional[np.ndarray] = None
+    else:
+        node_degrees_arr = np.asarray(node_degrees).reshape(-1)
+
+    if node_degrees_arr is not None and len(node_degrees_arr) != len(fusion_weights):
+        min_len = min(len(node_degrees_arr), len(fusion_weights))
+        logging.warning(
+            "plot_fusion_weights_analysis: node_degrees(%d) 与 fusion_weights(%d) 长度不一致，已对齐到 %d（使用前 min_len）",
+            len(node_degrees_arr),
+            len(fusion_weights),
+            min_len,
+        )
+        node_degrees_arr = node_degrees_arr[:min_len]
+        fusion_weights = fusion_weights[:min_len]
     
     # === 左图: 权重 vs 度数散点图 ===
     ax = axes[0]
-    
-    ax.scatter(node_degrees, fusion_weights, alpha=0.3, s=10, c=COLORS['highlight'])
-    ax.axvline(degree_threshold, color=COLORS['anomaly'], linestyle='--', linewidth=2, 
-              label=f'Threshold: {degree_threshold}')
-    ax.axhline(0.5, color='black', linestyle=':', linewidth=1.5)
-    
-    ax.set_xlabel('Node Degree', fontsize=11)
-    ax.set_ylabel('α (Graph Weight)', fontsize=11)
-    ax.set_title('Fusion Weight vs Node Degree', fontsize=12, fontweight='bold')
-    ax.legend()
-    ax.set_xscale('log')
+
+    if node_degrees_arr is None or len(node_degrees_arr) == 0:
+        # 没有度数信息：降级为权重分布展示（避免训练流水线直接失败）
+        ax.hist(fusion_weights, bins=50, color=COLORS['highlight'], alpha=0.7, edgecolor='white')
+        ax.axvline(0.5, color='black', linestyle=':', linewidth=1.5)
+        ax.set_xlabel('α (Graph Weight)', fontsize=11)
+        ax.set_ylabel('Count', fontsize=11)
+        ax.set_title('Fusion Weight Distribution (no node degrees)', fontsize=12, fontweight='bold')
+    else:
+        ax.scatter(node_degrees_arr, fusion_weights, alpha=0.3, s=10, c=COLORS['highlight'])
+        ax.axvline(degree_threshold, color=COLORS['anomaly'], linestyle='--', linewidth=2,
+                  label=f'Threshold: {degree_threshold}')
+        ax.axhline(0.5, color='black', linestyle=':', linewidth=1.5)
+
+        ax.set_xlabel('Node Degree', fontsize=11)
+        ax.set_ylabel('α (Graph Weight)', fontsize=11)
+        ax.set_title('Fusion Weight vs Node Degree', fontsize=12, fontweight='bold')
+        ax.legend()
+        ax.set_xscale('log')
     
     # === 中图: 分组对比 ===
     ax = axes[1]
-    
-    inactive_mask = node_degrees < degree_threshold
-    active_mask = ~inactive_mask
-    
-    inactive_weights = fusion_weights[inactive_mask]
-    active_weights = fusion_weights[active_mask]
+
+    if node_degrees_arr is None or len(node_degrees_arr) == 0:
+        inactive_weights = fusion_weights
+        active_weights = np.array([], dtype=float)
+    else:
+        inactive_mask = node_degrees_arr < degree_threshold
+        active_mask = ~inactive_mask
+
+        inactive_weights = fusion_weights[inactive_mask]
+        active_weights = fusion_weights[active_mask]
     
     positions = [1, 2]
     bp = ax.boxplot([inactive_weights, active_weights], positions=positions, patch_artist=True)
@@ -204,24 +236,38 @@ def plot_fusion_weights_analysis(
     
     # === 右图: 度数区间权重分析 ===
     ax = axes[2]
-    
-    degree_bins = [1, 2, 5, 10, 20, 50, 100, max(node_degrees)+1]
-    mean_weights = []
-    bin_labels = []
-    
-    for i in range(len(degree_bins) - 1):
-        mask = (node_degrees >= degree_bins[i]) & (node_degrees < degree_bins[i+1])
-        if mask.sum() > 0:
-            mean_weights.append(fusion_weights[mask].mean())
-            bin_labels.append(f'{degree_bins[i]}-{degree_bins[i+1]-1}')
-    
-    bars = ax.bar(bin_labels, mean_weights, color=COLORS['highlight'], edgecolor='black')
-    ax.axhline(0.5, color='black', linestyle=':', linewidth=1.5, label='Equal Weight')
-    ax.set_xlabel('Degree Range', fontsize=11)
-    ax.set_ylabel('Mean α', fontsize=11)
-    ax.set_title('Mean Weight by Degree Range', fontsize=12, fontweight='bold')
-    ax.legend()
-    ax.tick_params(axis='x', rotation=45)
+
+    if node_degrees_arr is None or len(node_degrees_arr) == 0:
+        # 无度数：直接画权重分位数，保持三联图完整
+        qs = [50, 75, 90, 95, 99]
+        q_vals = [np.percentile(fusion_weights, q) for q in qs]
+        bars = ax.bar([f'P{q}' for q in qs], q_vals, color=COLORS['highlight'], edgecolor='black')
+        ax.axhline(0.5, color='black', linestyle=':', linewidth=1.5, label='Equal Weight')
+        ax.set_xlabel('Percentile', fontsize=11)
+        ax.set_ylabel('α', fontsize=11)
+        ax.set_title('Weight Percentiles', fontsize=12, fontweight='bold')
+        ax.legend()
+        for bar, val in zip(bars, q_vals):
+            ax.annotate(f'{val:.3f}', xy=(bar.get_x() + bar.get_width()/2, val),
+                       xytext=(0, 5), textcoords='offset points', ha='center', fontsize=9)
+    else:
+        degree_bins = [1, 2, 5, 10, 20, 50, 100, int(node_degrees_arr.max()) + 1]
+        mean_weights = []
+        bin_labels = []
+
+        for i in range(len(degree_bins) - 1):
+            mask = (node_degrees_arr >= degree_bins[i]) & (node_degrees_arr < degree_bins[i+1])
+            if mask.sum() > 0:
+                mean_weights.append(fusion_weights[mask].mean())
+                bin_labels.append(f'{degree_bins[i]}-{degree_bins[i+1]-1}')
+
+        bars = ax.bar(bin_labels, mean_weights, color=COLORS['highlight'], edgecolor='black')
+        ax.axhline(0.5, color='black', linestyle=':', linewidth=1.5, label='Equal Weight')
+        ax.set_xlabel('Degree Range', fontsize=11)
+        ax.set_ylabel('Mean α', fontsize=11)
+        ax.set_title('Mean Weight by Degree Range', fontsize=12, fontweight='bold')
+        ax.legend()
+        ax.tick_params(axis='x', rotation=45)
     
     plt.suptitle('Fusion Weight Analysis', fontsize=14, fontweight='bold', y=1.02)
     plt.tight_layout()

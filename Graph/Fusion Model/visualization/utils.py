@@ -2,6 +2,7 @@
 通用工具和样式设置
 """
 import matplotlib
+matplotlib.use('Agg')  # 使用非交互式后端，避免阻塞
 import matplotlib.pyplot as plt
 import numpy as np
 from typing import Optional

@@ -256,6 +256,11 @@ class TrainingPipeline:
         logging.info("步骤 6: 可视化")
         logging.info("=" * 60)
         
+        # 导入 matplotlib 并设置非交互模式
+        import matplotlib
+        matplotlib.use('Agg')  # 确保使用非交互式后端
+        import matplotlib.pyplot as plt
+        
         vis_dir = os.path.join(self.config.output_dir, "visualizations")
         os.makedirs(vis_dir, exist_ok=True)
         
@@ -278,7 +283,7 @@ class TrainingPipeline:
         tabular_scores = self.tabular_scores[:n_samples]
         
         # ============= 1. 模型性能可视化 =============
-        logging.info("绘制模型性能图...")
+        logging.info("绘制模型性能图 (1/5)...")
         
         # 1.1 训练曲线
         if self.graph_train_losses:
@@ -286,6 +291,8 @@ class TrainingPipeline:
                 graph_losses=self.graph_train_losses,
                 save_path=os.path.join(vis_dir, "training_curves.png")
             )
+            plt.close('all')  # 关闭所有图形
+            logging.info("  ✓ 训练曲线已保存")
         
         # 1.2 模型对比
         plot_model_comparison(
@@ -295,6 +302,8 @@ class TrainingPipeline:
             top_k=self.eval_config.top_k,
             save_path=os.path.join(vis_dir, "model_comparison.png")
         )
+        plt.close('all')
+        logging.info("  ✓ 模型对比已保存")
         
         # 1.3 分数统计
         plot_score_statistics(
@@ -303,9 +312,11 @@ class TrainingPipeline:
             fused_scores=self.fused_scores,
             save_path=os.path.join(vis_dir, "score_statistics.png")
         )
+        plt.close('all')
+        logging.info("  ✓ 分数统计已保存")
         
         # ============= 2. 融合分析可视化 =============
-        logging.info("绘制融合分析图...")
+        logging.info("绘制融合分析图 (2/5)...")
         
         # 2.1 融合概览
         plot_fusion_overview(
@@ -316,6 +327,8 @@ class TrainingPipeline:
             strategy=self.fusion_config.strategy,
             save_path=os.path.join(vis_dir, "fusion_overview.png")
         )
+        plt.close('all')
+        logging.info("  ✓ 融合概览已保存")
         
         # 2.2 融合权重分布
         if self.fusion_result.fusion_weights is not None:
@@ -324,6 +337,8 @@ class TrainingPipeline:
                 node_degrees=node_degrees,
                 save_path=os.path.join(vis_dir, "fusion_weights_distribution.png")
             )
+            plt.close('all')
+            logging.info("  ✓ 融合权重分布已保存")
         
         # 2.3 模型一致性分析
         plot_model_agreement(
@@ -333,9 +348,11 @@ class TrainingPipeline:
             top_k=self.eval_config.top_k,
             save_path=os.path.join(vis_dir, "model_agreement.png")
         )
+        plt.close('all')
+        logging.info("  ✓ 模型一致性已保存")
         
         # ============= 3. 特征贡献可视化 =============
-        logging.info("绘制特征贡献图...")
+        logging.info("绘制特征贡献图 (3/5)...")
         
         # 3.1 特征重要性（如有特征名称）
         feature_names = None
@@ -353,6 +370,8 @@ class TrainingPipeline:
                 feature_names=feature_names,
                 save_path=os.path.join(vis_dir, "feature_importance.png")
             )
+            plt.close('all')
+            logging.info("  ✓ 特征重要性已保存")
         
         # 3.2 模型贡献分析
         plot_model_contribution(
@@ -364,9 +383,11 @@ class TrainingPipeline:
             top_k=self.eval_config.top_k,
             save_path=os.path.join(vis_dir, "model_contribution.png")
         )
+        plt.close('all')
+        logging.info("  ✓ 模型贡献已保存")
         
         # ============= 4. 异常分布可视化 =============
-        logging.info("绘制异常分布图...")
+        logging.info("绘制异常分布图 (4/5)...")
         
         # 4.1 分数分布
         plot_score_distributions(
@@ -375,6 +396,8 @@ class TrainingPipeline:
             fused_scores=self.fused_scores,
             save_path=os.path.join(vis_dir, "score_distributions.png")
         )
+        plt.close('all')
+        logging.info("  ✓ 分数分布已保存")
         
         # 4.2 异常散点图
         plot_anomaly_scatter(
@@ -384,6 +407,8 @@ class TrainingPipeline:
             top_k=self.eval_config.top_k,
             save_path=os.path.join(vis_dir, "anomaly_scatter.png")
         )
+        plt.close('all')
+        logging.info("  ✓ 异常散点图已保存")
         
         # 4.3 Top-K 分析
         plot_topk_analysis(
@@ -393,9 +418,11 @@ class TrainingPipeline:
             k_values=[100, 200, 500, 1000, 2000],
             save_path=os.path.join(vis_dir, "topk_analysis.png")
         )
+        plt.close('all')
+        logging.info("  ✓ Top-K分析已保存")
         
         # ============= 5. 综合报告 =============
-        logging.info("创建综合报告...")
+        logging.info("创建综合报告 (5/5)...")
         
         # 准备评估报告
         evaluation_report = None
@@ -419,8 +446,12 @@ class TrainingPipeline:
             fusion_strategy=self.fusion_config.strategy,
             top_k=self.eval_config.top_k
         )
+        plt.close('all')
+        logging.info("  ✓ 综合报告已保存")
         
-        logging.info(f"所有可视化结果已保存到: {vis_dir}")
+        logging.info("=" * 60)
+        logging.info(f"✓ 所有可视化结果已保存到: {vis_dir}")
+        logging.info("=" * 60)
     
     def save_results(self):
         """保存结果"""

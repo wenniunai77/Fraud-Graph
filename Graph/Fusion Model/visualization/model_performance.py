@@ -114,16 +114,43 @@ def plot_model_comparison(
     
     n = len(graph_scores)
     
+    # 如果数据量太大，对正常点进行采样（但保留所有Top-K异常点）
+    max_normal_points = 50000  # 最多显示5万个正常点
+    
     # === 左上: 分数散点图 ===
     ax = axes[0, 0]
     
     # 获取 Top-K 索引
-    topk_idx = set(np.argsort(-fused_scores)[:top_k])
-    colors = [COLORS['anomaly'] if i in topk_idx else COLORS['normal'] for i in range(n)]
-    alphas = [0.8 if i in topk_idx else 0.1 for i in range(n)]
+    topk_idx = np.argsort(-fused_scores)[:top_k]
+    topk_mask = np.zeros(n, dtype=bool)
+    topk_mask[topk_idx] = True
     
-    for i in range(n):
-        ax.scatter(graph_scores[i], tabular_scores[i], c=colors[i], alpha=alphas[i], s=8)
+    # 对正常点采样
+    normal_mask = ~topk_mask
+    normal_indices = np.where(normal_mask)[0]
+    
+    if len(normal_indices) > max_normal_points:
+        # 随机采样正常点
+        np.random.seed(42)
+        sampled_normal_idx = np.random.choice(normal_indices, max_normal_points, replace=False)
+        # 使用整数数组索引
+        graph_scores_normal = graph_scores[sampled_normal_idx]
+        tabular_scores_normal = tabular_scores[sampled_normal_idx]
+    else:
+        # 使用布尔数组索引
+        graph_scores_normal = graph_scores[normal_mask]
+        tabular_scores_normal = tabular_scores[normal_mask]
+    
+    # 先画正常点（采样后的）
+    if len(graph_scores_normal) > 0:
+        ax.scatter(graph_scores_normal, tabular_scores_normal, 
+                  c=COLORS['normal'], alpha=0.1, s=8, label='Normal', rasterized=True)
+    
+    # 再画异常点（全部）
+    if topk_mask.sum() > 0:
+        ax.scatter(graph_scores[topk_mask], tabular_scores[topk_mask], 
+                  c=COLORS['anomaly'], alpha=0.8, s=20, label=f'Top-{top_k}',
+                  edgecolors='white', linewidths=0.5, zorder=5)
     
     # 添加对角线
     lims = [min(ax.get_xlim()[0], ax.get_ylim()[0]), 
