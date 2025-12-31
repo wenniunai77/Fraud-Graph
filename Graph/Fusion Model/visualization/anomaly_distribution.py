@@ -112,9 +112,48 @@ def plot_anomaly_scatter(
         top_k: Top-K 分析
         save_path: 保存路径
     """
+    import logging
+
+    # --- 输入标准化/对齐：避免 boolean index mismatch ---
+    graph_scores = np.asarray(graph_scores).reshape(-1)
+    tabular_scores = np.asarray(tabular_scores).reshape(-1)
+    fused_scores = np.asarray(fused_scores).reshape(-1)
+
+    min_len = min(len(graph_scores), len(tabular_scores), len(fused_scores))
+    if min_len == 0:
+        raise ValueError("plot_anomaly_scatter: 输入分数为空")
+
+    if len(graph_scores) != min_len or len(tabular_scores) != min_len or len(fused_scores) != min_len:
+        logging.warning(
+            "plot_anomaly_scatter: score 长度不一致 g=%d, t=%d, f=%d，已对齐到 min_len=%d",
+            len(graph_scores),
+            len(tabular_scores),
+            len(fused_scores),
+            min_len,
+        )
+        graph_scores = graph_scores[:min_len]
+        tabular_scores = tabular_scores[:min_len]
+        fused_scores = fused_scores[:min_len]
+
+    if node_degrees is not None:
+        node_degrees = np.asarray(node_degrees).reshape(-1)
+        if len(node_degrees) != min_len:
+            aligned_len = min(len(node_degrees), min_len)
+            logging.warning(
+                "plot_anomaly_scatter: node_degrees(%d) 与 scores(%d) 长度不一致，已对齐到 %d",
+                len(node_degrees),
+                min_len,
+                aligned_len,
+            )
+            node_degrees = node_degrees[:aligned_len]
+            graph_scores = graph_scores[:aligned_len]
+            tabular_scores = tabular_scores[:aligned_len]
+            fused_scores = fused_scores[:aligned_len]
+            min_len = aligned_len
+
     fig, axes = plt.subplots(1, 3, figsize=(18, 6))
     
-    n = len(graph_scores)
+    n = min_len
     topk_mask, topk_idx = get_topk_mask(fused_scores, top_k)
     
     # === 左图: Graph vs Tabular 散点 ===

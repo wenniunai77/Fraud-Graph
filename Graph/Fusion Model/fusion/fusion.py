@@ -65,16 +65,19 @@ class GatedFusion(FusionStrategy):
     def __init__(
         self,
         config: FusionConfig,
-        alpha_high: float = 0.7,
-        alpha_low: float = 0.3,
-        degree_threshold: int = 5,
-        use_hard_threshold: bool = False  # 新增: 是否使用硬阈值
+        alpha_high: Optional[float] = None,
+        alpha_low: Optional[float] = None,
+        degree_threshold: Optional[int] = None,
+        use_hard_threshold: Optional[bool] = None,
+        sigmoid_steepness: Optional[float] = None
     ):
         self.config = config
-        self.alpha_high = alpha_high  # 活跃节点的图权重
-        self.alpha_low = alpha_low    # 冷启动节点的图权重
-        self.degree_threshold = degree_threshold
-        self.use_hard_threshold = use_hard_threshold  # 硬阈值 vs 平滑过渡
+        # 从 config 读取参数，允许显式传入覆盖
+        self.alpha_high = alpha_high if alpha_high is not None else config.alpha_high
+        self.alpha_low = alpha_low if alpha_low is not None else config.alpha_low
+        self.degree_threshold = degree_threshold if degree_threshold is not None else config.degree_threshold
+        self.use_hard_threshold = use_hard_threshold if use_hard_threshold is not None else config.use_hard_threshold
+        self.sigmoid_steepness = sigmoid_steepness if sigmoid_steepness is not None else config.sigmoid_steepness
     
     def fuse(
         self,
@@ -99,35 +102,36 @@ class GatedFusion(FusionStrategy):
         
         if node_degrees is not None:
             # 基于度数计算动态权重
-            # 方案1: 硬阈值分段（可选择启用）
-            # 方案2: 平滑过渡（当前默认）
-            
             # 统计度数分布
-            unique_degrees = np.unique(node_degrees)
             logging.info(f"度数分布: min={node_degrees.min()}, max={node_degrees.max()}, "
                         f"median={np.median(node_degrees):.1f}, mean={node_degrees.mean():.1f}")
             logging.info(f"度数阈值: {self.degree_threshold}")
             
-            # 方案2: 平滑过渡（默认，保持原有逻辑）
-            normalized_degree = node_degrees / (node_degrees.max() + 1e-8)
-            alpha = self.alpha_low + (self.alpha_high - self.alpha_low) * normalized_degree
-            
-            # 统计活跃/非活跃节点数量（基于阈值）
+            # 统计活跃/非活跃边数量（基于阈值）
             inactive_count = (node_degrees < self.degree_threshold).sum()
             active_count = (node_degrees >= self.degree_threshold).sum()
-            logging.info(f"节点分类: 非活跃(<{self.degree_threshold})={inactive_count} ({inactive_count/n*100:.1f}%), "
+            logging.info(f"边活跃度分类 (基于 min(src_out_deg, dst_in_deg)): "
+                        f"非活跃(<{self.degree_threshold})={inactive_count} ({inactive_count/n*100:.1f}%), "
                         f"活跃(≥{self.degree_threshold})={active_count} ({active_count/n*100:.1f}%)")
             
-            # 根据配置选择阈值模式
             if self.use_hard_threshold:
-                # 硬阈值：二元分类
+                # 硬阈值模式：二元分类
                 alpha = np.where(
                     node_degrees < self.degree_threshold,
-                    self.alpha_low,   # 度数 < 阈值: 非活跃节点，用低权重
-                    self.alpha_high   # 度数 >= 阈值: 活跃节点，用高权重
+                    self.alpha_low,   # 度数 < 阈值: 非活跃边，用低权重
+                    self.alpha_high   # 度数 >= 阈值: 活跃边，用高权重
                 )
                 logging.info(f"使用硬阈值模式: 非活跃α={self.alpha_low}, 活跃α={self.alpha_high}")
-            # else: 保持上面的平滑过渡逻辑
+            else:
+                # 平滑过渡模式：以 degree_threshold 为拐点的 sigmoid 平滑
+                # 公式: α = α_low + (α_high - α_low) * sigmoid(k * (deg - threshold))
+                # k 控制平滑陡峭程度，从 config 读取
+                from scipy.special import expit  # 数值稳定的 sigmoid
+                x = node_degrees.astype(np.float64) - self.degree_threshold
+                sigmoid = expit(self.sigmoid_steepness * x)
+                alpha = self.alpha_low + (self.alpha_high - self.alpha_low) * sigmoid
+                logging.info(f"使用平滑过渡模式: 拐点={self.degree_threshold}, "
+                           f"陡峭度={self.sigmoid_steepness}, α 范围约 [{self.alpha_low:.2f}, {self.alpha_high:.2f}]")
         else:
             # 如果没有度数信息，使用固定权重
             alpha = np.full(n, (self.alpha_high + self.alpha_low) / 2)

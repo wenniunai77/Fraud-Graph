@@ -161,14 +161,6 @@ output/
 - **异常散点图**：二维展示图分数vs表格分数的关系
 - **Top-K分析**：分析不同K值下模型的重叠率和一致性
 
-## 一键运行（向后兼容）
-
-如果希望一次性完成预处理和训练，可以使用原有的 `run_fusion.py`：
-
-```bash
-python run_fusion.py --data ../graph_main/raw_data/xxx.csv --output ./output
-```
-
 ## 安装依赖
 
 ```bash

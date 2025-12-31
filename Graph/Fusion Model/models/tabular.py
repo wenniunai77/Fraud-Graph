@@ -204,18 +204,31 @@ class TabularAnomalyDetector:
         scores = self.predict_scores(X, device)
         
         if self.config.model_type == "ensemble":
+            # 动态加权融合：只对存在的模型归一化权重
+            raw_weights = self.config.ensemble_weights  # [IF, LOF, AE]
+            model_keys = ["isolation_forest", "lof", "autoencoder"]
+            
+            # 收集存在的模型分数和对应权重
+            active_scores = []
+            active_weights = []
+            for i, key in enumerate(model_keys):
+                if key in scores:
+                    active_scores.append(scores[key])
+                    active_weights.append(raw_weights[i])
+            
+            if len(active_scores) == 0:
+                logging.warning("没有可用的子模型分数，返回零分数")
+                return np.zeros(X.shape[0])
+            
+            # 归一化权重使其和为 1
+            weight_sum = sum(active_weights)
+            normalized_weights = [w / weight_sum for w in active_weights]
+            
             # 加权融合
-            weights = self.config.ensemble_weights
-            score_list = []
+            fusion_score = np.zeros_like(active_scores[0])
+            for s, w in zip(active_scores, normalized_weights):
+                fusion_score += s * w
             
-            if "isolation_forest" in scores:
-                score_list.append(scores["isolation_forest"] * weights[0])
-            if "lof" in scores:
-                score_list.append(scores["lof"] * weights[1])
-            if "autoencoder" in scores:
-                score_list.append(scores["autoencoder"] * weights[2])
-            
-            fusion_score = np.sum(score_list, axis=0)
             return self._normalize_scores(fusion_score)
         else:
             # 单模型
@@ -228,6 +241,17 @@ class TabularAnomalyDetector:
         if max_s - min_s > 1e-8:
             return (scores - min_s) / (max_s - min_s)
         return np.zeros_like(scores)
+    
+    def get_training_info(self) -> Dict:
+        """获取训练信息"""
+        return {
+            "model_type": self.config.model_type,
+            "fitted": self._fitted,
+            "has_isolation_forest": self.isolation_forest is not None,
+            "has_lof": self.lof is not None,
+            "has_autoencoder": self.autoencoder is not None,
+            "ensemble_weights": self.config.ensemble_weights if self.config.model_type == "ensemble" else None,
+        }
     
     def save(self, path: str):
         """保存模型"""

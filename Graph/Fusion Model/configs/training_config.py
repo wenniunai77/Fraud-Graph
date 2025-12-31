@@ -99,10 +99,11 @@ class FusionConfig:
     strategy: str = "gated"
     
     # 门控融合参数
-    degree_threshold: int = 3
+    degree_threshold: int = 5  # 活跃度阈值（统一默认值）
     alpha_high: float = 0.7
     alpha_low: float = 0.3
     use_hard_threshold: bool = False
+    sigmoid_steepness: float = 1.0  # sigmoid 平滑的陡峭程度（k值）
     
     # 加权融合参数
     fusion_alpha: float = 0.5
