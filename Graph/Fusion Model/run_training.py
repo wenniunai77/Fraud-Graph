@@ -22,27 +22,6 @@ from configs import TrainingMainConfig
 from models import TabularAnomalyDetector, GraphAnomalyDetector
 from fusion import create_fusion_strategy, analyze_fusion, print_fusion_report
 from evaluation import UnsupervisedEvaluator
-from visualization import (
-    # 样式设置
-    setup_style,
-    # 模型性能
-    plot_training_curves,
-    plot_model_comparison,
-    plot_score_statistics,
-    # 融合分析
-    plot_fusion_overview,
-    plot_fusion_weights_distribution,
-    plot_model_agreement,
-    # 特征贡献
-    plot_feature_importance,
-    plot_model_contribution,
-    # 异常分布
-    plot_score_distributions,
-    plot_anomaly_scatter,
-    plot_topk_analysis,
-    # 仪表板
-    create_comprehensive_report
-)
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
@@ -260,222 +239,11 @@ class TrainingPipeline:
             top_k=self.eval_config.top_k
         )
         
+        # 打印报告 (EvaluationReport 对象)
         self.evaluator.print_report(report)
         
-        return report
-    
-    def visualize_results(self):
-        """可视化结果"""
-        if not self.config.visualize:
-            logging.info("可视化已禁用，跳过")
-            return
-        
-        logging.info("=" * 60)
-        logging.info("步骤 6: 可视化")
-        logging.info("=" * 60)
-        
-        # 导入 matplotlib 并设置非交互模式
-        import matplotlib
-        matplotlib.use('Agg')  # 确保使用非交互式后端
-        import matplotlib.pyplot as plt
-        
-        vis_dir = os.path.join(self.config.output_dir, "visualizations")
-        os.makedirs(vis_dir, exist_ok=True)
-        
-        # 设置可视化样式
-        setup_style()
-        
-        # 准备统一长度的分数
-        n_samples = len(self.fused_scores)
-        graph_scores = self.graph_scores[:n_samples]
-        tabular_scores = self.tabular_scores[:n_samples]
-        
-        # 获取 per-edge 度数（与 fuse_scores 保持一致）
-        edge_degrees = None
-        if hasattr(self.graph_data, 'edge_index'):
-            if hasattr(self.graph_data, 'original_edge_index'):
-                edge_index = self.graph_data.original_edge_index.cpu().numpy()
-            else:
-                edge_index = self.graph_data.edge_index.cpu().numpy()
-            
-            num_nodes = self.graph_data.num_nodes
-            out_degree = np.bincount(edge_index[0], minlength=num_nodes)
-            in_degree = np.bincount(edge_index[1], minlength=num_nodes)
-            
-            src_nodes = edge_index[0][:n_samples]
-            dst_nodes = edge_index[1][:n_samples]
-            edge_degrees = np.minimum(out_degree[src_nodes], in_degree[dst_nodes])
-        
-        # ============= 1. 模型性能可视化 =============
-        logging.info("绘制模型性能图 (1/5)...")
-        
-        # 1.1 训练曲线
-        if self.graph_train_losses:
-            plot_training_curves(
-                graph_losses=self.graph_train_losses,
-                save_path=os.path.join(vis_dir, "training_curves.png")
-            )
-            plt.close('all')  # 关闭所有图形
-            logging.info("  ✓ 训练曲线已保存")
-        
-        # 1.2 模型对比
-        plot_model_comparison(
-            graph_scores=graph_scores,
-            tabular_scores=tabular_scores,
-            fused_scores=self.fused_scores,
-            top_k=self.eval_config.top_k,
-            save_path=os.path.join(vis_dir, "model_comparison.png")
-        )
-        plt.close('all')
-        logging.info("  ✓ 模型对比已保存")
-        
-        # 1.3 分数统计
-        plot_score_statistics(
-            graph_scores=graph_scores,
-            tabular_scores=tabular_scores,
-            fused_scores=self.fused_scores,
-            save_path=os.path.join(vis_dir, "score_statistics.png")
-        )
-        plt.close('all')
-        logging.info("  ✓ 分数统计已保存")
-        
-        # ============= 2. 融合分析可视化 =============
-        logging.info("绘制融合分析图 (2/5)...")
-        
-        # 2.1 融合概览
-        plot_fusion_overview(
-            graph_scores=graph_scores,
-            tabular_scores=tabular_scores,
-            fused_scores=self.fused_scores,
-            fusion_weights=self.fusion_result.fusion_weights,
-            strategy=self.fusion_config.strategy,
-            save_path=os.path.join(vis_dir, "fusion_overview.png")
-        )
-        plt.close('all')
-        logging.info("  ✓ 融合概览已保存")
-        
-        # 2.2 融合权重分布
-        if self.fusion_result.fusion_weights is not None:
-            plot_fusion_weights_distribution(
-                fusion_weights=self.fusion_result.fusion_weights,
-                node_degrees=edge_degrees,
-                save_path=os.path.join(vis_dir, "fusion_weights_distribution.png")
-            )
-            plt.close('all')
-            logging.info("  ✓ 融合权重分布已保存")
-        
-        # 2.3 模型一致性分析
-        plot_model_agreement(
-            graph_scores=graph_scores,
-            tabular_scores=tabular_scores,
-            fused_scores=self.fused_scores,
-            top_k=self.eval_config.top_k,
-            save_path=os.path.join(vis_dir, "model_agreement.png")
-        )
-        plt.close('all')
-        logging.info("  ✓ 模型一致性已保存")
-        
-        # ============= 3. 特征贡献可视化 =============
-        logging.info("绘制特征贡献图 (3/5)...")
-        
-        # 3.1 特征重要性（如有特征名称）
-        feature_names = None
-        if self.meta_info:
-            # 尝试从不同位置获取特征名称
-            if 'tabular_info' in self.meta_info and 'feature_names' in self.meta_info['tabular_info']:
-                feature_names = self.meta_info['tabular_info']['feature_names']
-            elif 'feature_names' in self.meta_info:
-                feature_names = self.meta_info['feature_names']
-        
-        if feature_names and self.tabular_features is not None:
-            plot_feature_importance(
-                tabular_features=self.tabular_features[:n_samples],
-                tabular_scores=tabular_scores,
-                feature_names=feature_names,
-                save_path=os.path.join(vis_dir, "feature_importance.png")
-            )
-            plt.close('all')
-            logging.info("  ✓ 特征重要性已保存")
-        
-        # 3.2 模型贡献分析
-        plot_model_contribution(
-            graph_scores=graph_scores,
-            tabular_scores=tabular_scores,
-            fused_scores=self.fused_scores,
-            fusion_weights=self.fusion_result.fusion_weights,
-            node_degrees=edge_degrees,
-            top_k=self.eval_config.top_k,
-            save_path=os.path.join(vis_dir, "model_contribution.png")
-        )
-        plt.close('all')
-        logging.info("  ✓ 模型贡献已保存")
-        
-        # ============= 4. 异常分布可视化 =============
-        logging.info("绘制异常分布图 (4/5)...")
-        
-        # 4.1 分数分布
-        plot_score_distributions(
-            graph_scores=graph_scores,
-            tabular_scores=tabular_scores,
-            fused_scores=self.fused_scores,
-            save_path=os.path.join(vis_dir, "score_distributions.png")
-        )
-        plt.close('all')
-        logging.info("  ✓ 分数分布已保存")
-        
-        # 4.2 异常散点图
-        plot_anomaly_scatter(
-            graph_scores=graph_scores,
-            tabular_scores=tabular_scores,
-            fused_scores=self.fused_scores,
-            top_k=self.eval_config.top_k,
-            save_path=os.path.join(vis_dir, "anomaly_scatter.png")
-        )
-        plt.close('all')
-        logging.info("  ✓ 异常散点图已保存")
-        
-        # 4.3 Top-K 分析
-        plot_topk_analysis(
-            graph_scores=graph_scores,
-            tabular_scores=tabular_scores,
-            fused_scores=self.fused_scores,
-            k_values=[100, 200, 500, 1000, 2000],
-            save_path=os.path.join(vis_dir, "topk_analysis.png")
-        )
-        plt.close('all')
-        logging.info("  ✓ Top-K分析已保存")
-        
-        # ============= 5. 综合报告 =============
-        logging.info("创建综合报告 (5/5)...")
-        
-        # 准备评估报告
-        evaluation_report = None
-        if self.df is not None:
-            evaluator = UnsupervisedEvaluator(self.eval_config)
-            df_subset = self.df.iloc[:n_samples]
-            evaluation_report = evaluator.evaluate(
-                df=df_subset,
-                scores=self.fused_scores,
-                top_k=self.eval_config.top_k
-            )
-        
-        create_comprehensive_report(
-            graph_scores=graph_scores,
-            tabular_scores=tabular_scores,
-            fused_scores=self.fused_scores,
-            output_dir=vis_dir,
-            graph_train_losses=self.graph_train_losses,
-            fusion_weights=self.fusion_result.fusion_weights,
-            node_degrees=edge_degrees,
-            fusion_strategy=self.fusion_config.strategy,
-            top_k=self.eval_config.top_k
-        )
-        plt.close('all')
-        logging.info("  ✓ 综合报告已保存")
-        
-        logging.info("=" * 60)
-        logging.info(f"✓ 所有可视化结果已保存到: {vis_dir}")
-        logging.info("=" * 60)
+        # 返回字典格式 (用于保存)
+        return report.to_dict()
     
     def save_results(self):
         """保存结果（增强版：支持可视化脚本读取）"""
@@ -518,11 +286,13 @@ class TrainingPipeline:
         if self.df is not None and hasattr(self, 'evaluator') and self.evaluator is not None:
             df_subset = self.df.iloc[:n_samples]
             try:
-                evaluation_report = self.evaluator.evaluate(
+                eval_result = self.evaluator.evaluate(
                     df=df_subset,
                     scores=self.fused_scores,
                     top_k=self.eval_config.top_k
                 )
+                # 转换为字典格式以便序列化和后续访问
+                evaluation_report = eval_result.to_dict()
             except Exception as e:
                 logging.warning(f"生成评估报告失败: {e}")
         
@@ -762,12 +532,8 @@ class TrainingPipeline:
         
         logging.info(f"文字报告已保存: {report_path}")
     
-    def run(self, skip_visualization: bool = False):
-        """运行完整训练流水线
-        
-        Args:
-            skip_visualization: 是否跳过可视化步骤 (可后续通过 run_visualization.py 生成)
-        """
+    def run(self):
+        """运行完整训练流水线"""
         start_time = datetime.now()
         logging.info(f"\n开始训练流水线 - {start_time}")
         
@@ -777,19 +543,15 @@ class TrainingPipeline:
             self.train_graph_model()
             self.fuse_scores()
             self.evaluate()
-            self.save_results()  # 保存结果移到可视化之前
-            
-            if not skip_visualization:
-                self.visualize_results()
-            else:
-                logging.info("=" * 60)
-                logging.info("可视化已跳过")
-                logging.info(f"运行以下命令生成可视化: python run_visualization.py --results {self.config.output_dir}")
-                logging.info("=" * 60)
+            self.save_results()
             
             end_time = datetime.now()
             duration = (end_time - start_time).total_seconds()
             logging.info(f"\n训练流水线完成. 总耗时: {duration:.1f} 秒")
+            logging.info("=" * 60)
+            logging.info("提示: 运行以下命令生成可视化")
+            logging.info(f"  python run_visualization.py --results {self.config.output_dir}")
+            logging.info("=" * 60)
             
         except Exception as e:
             logging.error(f"训练流水线执行失败: {e}")
@@ -803,8 +565,8 @@ def main():
     parser.add_argument(
         "--processed-data",
         type=str,
-        required=True,
-        help="预处理数据目录"
+        default="./processed_data",
+        help="预处理数据目录 (默认: ./processed_data)"
     )
     
     parser.add_argument(
@@ -837,18 +599,6 @@ def main():
     )
     
     parser.add_argument(
-        "--no-visualize",
-        action="store_true",
-        help="[已弃用] 使用 --skip-visualization"
-    )
-    
-    parser.add_argument(
-        "--skip-visualization",
-        action="store_true",
-        help="跳过可视化 (可后续通过 run_visualization.py 生成)"
-    )
-    
-    parser.add_argument(
         "--device",
         type=int,
         default=0,
@@ -864,12 +614,11 @@ def main():
     config.fusion.strategy = args.strategy
     config.train.epochs = args.epochs
     config.evaluation.top_k = args.top_k
-    config.visualize = not (args.no_visualize or args.skip_visualization)
     config.device = args.device
     
     # 创建并运行流水线
     pipeline = TrainingPipeline(config)
-    pipeline.run(skip_visualization=args.skip_visualization or args.no_visualize)
+    pipeline.run()
 
 
 if __name__ == "__main__":

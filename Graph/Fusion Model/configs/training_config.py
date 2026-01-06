@@ -104,6 +104,11 @@ class FusionConfig:
     alpha_low: float = 0.3
     use_hard_threshold: bool = False
     sigmoid_steepness: float = 1.0  # sigmoid 平滑的陡峭程度（k值）
+
+    # 门控融合的分数空间:
+    # - "minmax": 传统 min-max 归一化后再门控（默认，保持历史行为）
+    # - "rank": 先转为 rank/quantile (0~1) 再门控（对重尾分布更鲁棒）
+    gated_score_space: str = "minmax"
     
     # 加权融合参数
     fusion_alpha: float = 0.5
@@ -169,7 +174,6 @@ class TrainingMainConfig:
     # 输出控制
     save_model: bool = True
     save_scores: bool = True
-    visualize: bool = True
     verbose: bool = True
     
     def get_graph_data_path(self) -> str:

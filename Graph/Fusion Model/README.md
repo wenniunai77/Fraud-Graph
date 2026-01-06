@@ -2,6 +2,23 @@
 
 基于 **Fusion.md** 方案实现的无监督/自监督欺诈检测融合框架。
 
+## 🆕 重要更新：Embedding 预训练功能
+
+**现在类别特征不再是随机初始化的 embedding 了！**
+
+我们引入了 **无监督预训练** 功能（Masked Attribute Modeling），使类别特征的 embedding 能够学习到业务语义和字段关系。
+
+- 📖 **快速开始**: 见 [`QUICKSTART_PRETRAIN.md`](./QUICKSTART_PRETRAIN.md)
+- 📚 **完整说明**: 见 [`EMBEDDING_PRETRAIN_README.md`](./EMBEDDING_PRETRAIN_README.md)
+- ⚡ **默认启用**: 直接运行预处理即可，首次会自动训练（增加 1-10 分钟）
+
+**效果提升**：
+- ✅ 类别特征表达能力显著增强（不再是废的）
+- ✅ 相似类别值会有相似的 embedding 向量
+- ✅ 异常检测效果预期提升（尤其对类别组合异常敏感）
+
+---
+
 ## 核心思路
 
 在无标签场景下，单一模型难以可靠评估；本项目融合两类方法：
@@ -13,24 +30,35 @@
 
 ## 项目结构
 
+## 可视化图表怎么看？
+
+如果你已经生成了 `visualization/dashboard.py` 的可视化报告，建议先读这份逐图说明：
+
+- `VISUALIZATIONS_EXPLAINED.md`：每一张图画什么、横纵轴是什么、以及推荐的阅读顺序。
+
 ```
 Fusion Model/
 ├── README.md                    # 项目说明
+├── QUICKSTART_PRETRAIN.md      # 🆕 预训练快速开始
+├── EMBEDDING_PRETRAIN_README.md # 🆕 预训练完整文档
 ├── run_preprocess.py           # 预处理脚本（数据加载+特征工程+图构建）
 ├── run_training.py             # 训练脚本（模型训练+融合+评估）
+├── test_embedding_pretrain.py  # 🆕 预训练功能测试
 ├── utils.py                     # 工具函数
 │
 ├── configs/                     # 配置模块
 │   ├── __init__.py
 │   ├── base_config.py          # 基础配置（列索引）
-│   ├── preprocess_config.py    # 预处理配置
+│   ├── preprocess_config.py    # 预处理配置（含预训练选项）
+│   ├── embedding_config.py     # 🆕 Embedding 预训练配置
 │   └── training_config.py      # 训练配置
 │
 ├── preprocess/                  # 数据预处理
 │   ├── __init__.py
 │   ├── data_loader.py          # 数据加载
-│   ├── feature_engineer.py     # 特征工程
-│   └── graph_builder.py        # 图构建
+│   ├── feature_engineer.py     # 特征工程（支持预训练 embedding）
+│   ├── graph_builder.py        # 图构建
+│   └── train_embeddings.py     # 🆕 Embedding 预训练模块
 │
 ├── models/                      # 模型定义
 │   ├── __init__.py
@@ -55,15 +83,18 @@ Fusion Model/
 │   └── dashboard.py            # 综合报告仪表板
 │
 ├── processed_data/              # 预处理输出（图数据、特征等）
+│   └── pretrained_embeddings.pt # 🆕 预训练 embedding 权重
 ├── output/                      # 训练输出（分数、模型等）
 └── checkpoints/                 # 模型检查点
 ```
 
 ## 运行流程（推荐：分步执行）
 
-### 步骤 1: 预处理
+### 步骤 1: 预处理（✨ 自动包含 embedding 预训练）
 
 预处理阶段负责数据加载、特征工程和图构建，输出预处理完成的数据。
+
+**首次运行会自动训练 embedding（增加 1-10 分钟），后续运行直接复用。**
 
 ```bash
 cd "Graph/Fusion Model"
@@ -85,6 +116,7 @@ python run_preprocess.py \
 processed_data/
 ├── graph_data.pt               # 完整图数据（PyG Data对象）
 ├── tabular_features.npy        # 表格特征矩阵
+├── pretrained_embeddings.pt    # 🆕 预训练 embedding 权重
 ├── raw_data.pkl                # 原始数据副本
 ├── node_mapping.pkl            # 节点ID映射
 ├── feature_engineer.pkl        # 特征工程器（用于推理）
@@ -195,6 +227,13 @@ else:
 
 - 高活跃度账户：更信任图模型（α_high = 0.7）
 - 冷启动账户：更信任表格模型（α_low = 0.3）
+
+**🆕（鲁棒性增强）门控在 Rank 空间进行：**
+
+异常分数往往是重尾分布，min-max 容易被极端值拉伸。当前实现支持在 **rank/quantile 空间**做门控融合：
+
+- `gated_score_space = "minmax"`：默认行为，先 min-max 再门控（兼容历史结果）
+- `gated_score_space = "rank"`：先把两路分数转为 rank（0~1），再按同样的 α 门控融合（更稳）
 
 ### 2. 加权融合（Weighted Fusion）
 

@@ -37,6 +37,11 @@ class PreprocessConfig:
     # 嵌入维度（用于类别特征）
     embedding_dim: int = 8
     
+    # ============ Embedding 预训练配置 ============
+    use_pretrained_embeddings: bool = True  # 是否使用预训练 embedding
+    pretrained_embedding_path: str = "./processed_data/pretrained_embeddings.pt"  # 预训练权重路径
+    train_embeddings_if_not_exist: bool = True  # 如果预训练权重不存在，是否自动训练
+    
     # 采样设置
     use_full_dataset: bool = True
     sample_size: int = 500000

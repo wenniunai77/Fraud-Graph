@@ -36,8 +36,18 @@ class FeatureEngineer:
             "encoding_info": {}
         }
     
-    def build_edge_features(self, df: pd.DataFrame) -> Tuple[torch.Tensor, List[str]]:
-        """构建边特征（用于图模型）"""
+    def build_edge_features(
+        self, 
+        df: pd.DataFrame,
+        pretrained_embeddings: Optional[Dict] = None
+    ) -> Tuple[torch.Tensor, List[str]]:
+        """
+        构建边特征（用于图模型）
+        
+        Args:
+            df: 数据框
+            pretrained_embeddings: 预训练的 embedding 字典（可选）
+        """
         logging.info("构建边特征...")
         
         all_features = []
@@ -53,7 +63,9 @@ class FeatureEngineer:
         
         # 2. 类别特征（嵌入）
         logging.info("处理类别特征...")
-        cat_features, cat_names, cat_encoding_info = self._process_categorical_features(df)
+        cat_features, cat_names, cat_encoding_info = self._process_categorical_features(
+            df, pretrained_embeddings
+        )
         if cat_features is not None:
             all_features.append(cat_features)
             feature_names.extend(cat_names)
@@ -279,8 +291,24 @@ class FeatureEngineer:
         
         return torch.tensor(features, dtype=torch.float), feature_names, fillna_info
     
-    def _process_categorical_features(self, df: pd.DataFrame) -> Tuple[Optional[torch.Tensor], List[str], Dict]:
-        """处理类别特征（嵌入）"""
+    def _process_categorical_features(
+        self, 
+        df: pd.DataFrame,
+        pretrained_embeddings: Optional[Dict] = None
+    ) -> Tuple[Optional[torch.Tensor], List[str], Dict]:
+        """
+        处理类别特征（嵌入）
+        
+        Args:
+            df: 数据框
+            pretrained_embeddings: 预训练的 embedding 字典（可选）
+                格式: {"embeddings": {field_name: weight_tensor}, "category_mappings": {...}}
+        
+        Returns:
+            cat_features: embedding 特征张量
+            feature_names: 特征名列表
+            encoding_info: 编码信息
+        """
         categorical_cols = self.config.categorical_cols
         col_idx = self.config.col_idx
         
@@ -302,6 +330,15 @@ class FeatureEngineer:
         feature_names = []
         encoding_info = {}
         
+        # 检查是否使用预训练 embedding
+        use_pretrained = pretrained_embeddings is not None
+        if use_pretrained:
+            logging.info("使用预训练 embedding 权重")
+            pretrained_emb_dict = pretrained_embeddings.get("embeddings", {})
+            pretrained_mappings = pretrained_embeddings.get("category_mappings", {})
+        else:
+            logging.info("使用随机初始化 embedding（未启用预训练）")
+        
         for col_i in categorical_cols:
             col_data = df.iloc[:, col_i].astype(str).fillna('UNKNOWN')
             col_name = col_name_map.get(col_i, f"cat_col_{col_i}")
@@ -314,10 +351,32 @@ class FeatureEngineer:
             
             indices = torch.tensor([category_to_idx[val] for val in col_data], dtype=torch.long)
             
+            # 创建 embedding 层
             embedding_layer = torch.nn.Embedding(num_categories, embedding_dim)
-            torch.nn.init.xavier_uniform_(embedding_layer.weight)
+            
+            # 如果有预训练权重，尝试加载
+            if use_pretrained and col_name in pretrained_emb_dict:
+                pretrained_weight = pretrained_emb_dict[col_name]
+                pretrained_mapping = pretrained_mappings.get(col_name, {})
+                
+                # 对齐预训练权重到当前数据的类别映射
+                aligned_weight = self._align_pretrained_embedding(
+                    pretrained_weight,
+                    pretrained_mapping,
+                    category_to_idx,
+                    embedding_dim
+                )
+                embedding_layer.weight.data.copy_(aligned_weight)
+                logging.info(f"  ✓ {col_name}: 已加载预训练权重 ({num_categories} 类别)")
+            else:
+                # 随机初始化
+                torch.nn.init.xavier_uniform_(embedding_layer.weight)
+                if use_pretrained:
+                    logging.warning(f"  ⚠ {col_name}: 预训练权重不存在，使用随机初始化")
+            
             self.embeddings[col_i] = embedding_layer
             
+            # 提取 embedding 特征
             with torch.no_grad():
                 embedded = embedding_layer(indices)
             
@@ -327,11 +386,36 @@ class FeatureEngineer:
             
             encoding_info[col_name] = {
                 "num_categories": num_categories,
-                "embedding_dim": embedding_dim
+                "embedding_dim": embedding_dim,
+                "pretrained": use_pretrained and col_name in pretrained_emb_dict
             }
         
         cat_features = torch.cat(all_embeddings, dim=1)
         return cat_features, feature_names, encoding_info
+    
+    def _align_pretrained_embedding(
+        self,
+        pretrained_weight: torch.Tensor,
+        pretrained_mapping: Dict[str, int],
+        current_mapping: Dict[str, int],
+        embedding_dim: int
+    ) -> torch.Tensor:
+        """
+        对齐预训练 embedding 到当前数据的类别映射
+        
+        对于当前数据中新出现的类别，使用随机初始化
+        """
+        num_current_categories = len(current_mapping)
+        aligned_weight = torch.randn(num_current_categories, embedding_dim) * 0.01  # 新类别用小随机值
+        
+        # 复制预训练权重
+        for category, current_idx in current_mapping.items():
+            if category in pretrained_mapping:
+                pretrained_idx = pretrained_mapping[category]
+                if pretrained_idx < pretrained_weight.shape[0]:
+                    aligned_weight[current_idx] = pretrained_weight[pretrained_idx]
+        
+        return aligned_weight
     
     def _process_time_features(self, df: pd.DataFrame) -> Tuple[Optional[torch.Tensor], List[str], Dict]:
         """处理时间特征"""

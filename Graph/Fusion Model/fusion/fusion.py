@@ -94,10 +94,24 @@ class GatedFusion(FusionStrategy):
             tabular_scores: 表格模型分数
             node_degrees: 节点度数（用于门控）
         """
-        # 归一化
-        g_norm = self.normalize_scores(graph_scores)
-        t_norm = self.normalize_scores(tabular_scores)
-        
+        # 归一化：门控建议在 rank/quantile 空间里做（更鲁棒）
+        # 兼容旧行为：默认仍使用 min-max
+        score_space = getattr(self.config, "gated_score_space", "minmax")
+        score_space = (score_space or "minmax").lower()
+
+        if score_space == "rank":
+            n = len(graph_scores)
+            # rankdata 返回 1..n，这里归一化到 (0,1]；再减去 1/n 变为 [0,1)
+            # 不用 min-max，避免重尾分布被极值拉伸
+            g_norm = (stats.rankdata(graph_scores) - 1) / max(n - 1, 1)
+            t_norm = (stats.rankdata(tabular_scores) - 1) / max(n - 1, 1)
+            logging.info("GatedFusion 使用 rank 分数空间进行门控融合")
+        elif score_space == "minmax":
+            g_norm = self.normalize_scores(graph_scores)
+            t_norm = self.normalize_scores(tabular_scores)
+        else:
+            raise ValueError(f"Unknown gated_score_space: {score_space}. Use 'minmax' or 'rank'.")
+
         n = len(graph_scores)
         
         if node_degrees is not None:
@@ -142,11 +156,16 @@ class GatedFusion(FusionStrategy):
         logging.info(f"门控融合完成. α 范围: [{alpha.min():.3f}, {alpha.max():.3f}]")
         
         return FusionResult(
-            fused_scores=self.normalize_scores(fused_scores),
+            # rank 空间的 fused_scores 本身就在 [0,1]，这里保持一致性不再二次 min-max
+            fused_scores=fused_scores if score_space == "rank" else self.normalize_scores(fused_scores),
             graph_scores=g_norm,
             tabular_scores=t_norm,
             fusion_weights=alpha,
-            metadata={"strategy": "gated", "degree_threshold": self.degree_threshold}
+            metadata={
+                "strategy": "gated",
+                "degree_threshold": self.degree_threshold,
+                "gated_score_space": score_space,
+            }
         )
 
 

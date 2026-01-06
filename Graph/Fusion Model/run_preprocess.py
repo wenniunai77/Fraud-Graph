@@ -18,7 +18,9 @@ from typing import Optional, Dict, Any
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from configs import PreprocessConfig
+from configs.embedding_config import EmbeddingPretrainConfig
 from preprocess import DataLoader, FeatureEngineer, GraphBuilder
+from preprocess.train_embeddings import EmbeddingPretrainer, load_pretrained_embeddings
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
@@ -84,7 +86,60 @@ class PreprocessPipeline:
             "num_features": len(self.tabular_feature_names)
         }
     
-    def build_graph(self):
+    def pretrain_embeddings_if_needed(self):
+        """如果需要，进行 embedding 预训练"""
+        # 如果不使用预训练，直接跳过
+        if not self.config.use_pretrained_embeddings:
+            logging.info("未启用预训练 embedding，将使用随机初始化")
+            return None
+        
+        pretrained_path = self.config.pretrained_embedding_path
+        
+        # 如果预训练权重已存在，直接加载
+        if os.path.exists(pretrained_path):
+            logging.info(f"加载现有预训练 embedding: {pretrained_path}")
+            return load_pretrained_embeddings(pretrained_path)
+        
+        # 如果不存在但不允许自动训练，返回 None（将使用随机初始化）
+        if not self.config.train_embeddings_if_not_exist:
+            logging.warning(f"预训练 embedding 不存在: {pretrained_path}")
+            logging.warning("未启用自动训练，将使用随机初始化")
+            return None
+        
+        # 自动训练 embedding
+        logging.info("=" * 60)
+        logging.info("预训练 Embedding（自动触发）")
+        logging.info("=" * 60)
+        
+        # 创建预训练配置
+        pretrain_config = EmbeddingPretrainConfig()
+        pretrain_config.embedding_dim = self.config.embedding_dim
+        pretrain_config.save_path = pretrained_path
+        
+        # 创建列名映射
+        col_idx = self.config.col_idx
+        col_name_map = {
+            col_idx.payment_channel: "payment_channel",
+            col_idx.debit_bic_code: "debit_bic_code",
+            col_idx.bene_bic_code: "bene_bic_code",
+            col_idx.instructed_currency: "instructed_currency",
+            col_idx.payment_currency: "payment_currency",
+            col_idx.credit_currency: "credit_currency",
+            col_idx.mop: "mop"
+        }
+        
+        # 训练
+        trainer = EmbeddingPretrainer(pretrain_config)
+        trainer.train(
+            df=self.df,
+            categorical_cols=self.config.categorical_cols,
+            col_name_map=col_name_map
+        )
+        
+        # 加载训练好的权重
+        return load_pretrained_embeddings(pretrained_path)
+    
+    def build_graph(self, pretrained_embeddings: Optional[Dict] = None):
         """构建图"""
         logging.info("=" * 60)
         logging.info("步骤 3: 图构建")
@@ -100,8 +155,10 @@ class PreprocessPipeline:
         edge_index = self.graph_builder.build_edge_index(self.df)
         logging.info(f"边索引构建完成: {edge_index.shape[1]:,} 条边")
         
-        # 3. 构建边特征
-        edge_features, edge_feature_names = self.feature_engineer.build_edge_features(self.df)
+        # 3. 构建边特征（传入预训练 embedding）
+        edge_features, edge_feature_names = self.feature_engineer.build_edge_features(
+            self.df, pretrained_embeddings
+        )
         logging.info(f"边特征构建完成: {edge_features.shape}")
         
         # 4. 构建节点特征
@@ -240,9 +297,19 @@ class PreprocessPipeline:
         logging.info(f"\n开始预处理流水线 - {start_time}")
         
         try:
+            # 1. 加载数据
             self.load_data(data_path)
+            
+            # 2. 构建表格特征
             self.build_features()
-            self.build_graph()
+            
+            # 3. 预训练 embedding（如果需要）
+            pretrained_embeddings = self.pretrain_embeddings_if_needed()
+            
+            # 4. 构建图（传入预训练 embedding）
+            self.build_graph(pretrained_embeddings)
+            
+            # 5. 保存结果
             self.save_results()
             
             end_time = datetime.now()
@@ -263,8 +330,8 @@ def main():
     parser.add_argument(
         "--data",
         type=str,
-        required=True,
-        help="输入数据路径 (CSV)"
+        default="../graph_main/raw_data/xxx.csv",
+        help="输入数据路径 (CSV) (默认: ../graph_main/raw_data/xxx.csv)"
     )
     
     parser.add_argument(

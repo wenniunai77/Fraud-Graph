@@ -4,6 +4,7 @@
 """
 from .base_config import ColumnIndex
 from .preprocess_config import PreprocessConfig
+from .embedding_config import EmbeddingPretrainConfig
 from .training_config import (
     TabularModelConfig,
     GraphModelConfig,
@@ -16,6 +17,7 @@ from .training_config import (
 __all__ = [
     "ColumnIndex",
     "PreprocessConfig",
+    "EmbeddingPretrainConfig",
     "TabularModelConfig",
     "GraphModelConfig",
     "TrainConfig",

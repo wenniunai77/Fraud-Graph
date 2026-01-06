@@ -154,188 +154,25 @@ class VisualizationPipeline:
         os.makedirs(output_dir, exist_ok=True)
     
     def run_all(self):
-        """运行所有可视化"""
+        """运行所有可视化 - 统一使用结构化输出"""
         setup_style()
         
         logging.info("=" * 60)
         logging.info("开始生成可视化")
         logging.info("=" * 60)
         
-        self.plot_model_performance()
-        self.plot_fusion_analysis()
-        self.plot_feature_contribution()
-        self.plot_anomaly_distribution()
+        # 直接调用 dashboard 的综合报告，避免重复生成
         self.create_report()
         
         logging.info("=" * 60)
         logging.info(f"✓ 所有可视化结果已保存到: {self.output_dir}")
         logging.info("=" * 60)
     
-    def plot_model_performance(self):
-        """模型性能可视化"""
-        logging.info("绘制模型性能图 (1/5)...")
-        
-        r = self.results
-        
-        # 1. 训练曲线
-        if r.graph_train_losses:
-            plot_training_curves(
-                graph_losses=r.graph_train_losses,
-                save_path=os.path.join(self.output_dir, "training_curves.png")
-            )
-            plt.close('all')
-            logging.info("  ✓ 训练曲线已保存")
-        
-        # 2. 模型对比
-        if r.graph_scores is not None and r.tabular_scores is not None:
-            plot_model_comparison(
-                graph_scores=r.graph_scores,
-                tabular_scores=r.tabular_scores,
-                fused_scores=r.fused_scores,
-                top_k=self.top_k,
-                save_path=os.path.join(self.output_dir, "model_comparison.png")
-            )
-            plt.close('all')
-            logging.info("  ✓ 模型对比已保存")
-        
-        # 3. 分数统计
-        if r.fused_scores is not None:
-            plot_score_statistics(
-                graph_scores=r.graph_scores,
-                tabular_scores=r.tabular_scores,
-                fused_scores=r.fused_scores,
-                save_path=os.path.join(self.output_dir, "score_statistics.png")
-            )
-            plt.close('all')
-            logging.info("  ✓ 分数统计已保存")
-    
-    def plot_fusion_analysis(self):
-        """融合分析可视化"""
-        logging.info("绘制融合分析图 (2/5)...")
-        
-        r = self.results
-        
-        # 1. 融合概览
-        plot_fusion_overview(
-            graph_scores=r.graph_scores,
-            tabular_scores=r.tabular_scores,
-            fused_scores=r.fused_scores,
-            fusion_weights=r.fusion_weights,
-            strategy=r.fusion_strategy or "unknown",
-            save_path=os.path.join(self.output_dir, "fusion_overview.png")
-        )
-        plt.close('all')
-        logging.info("  ✓ 融合概览已保存")
-        
-        # 2. 融合权重分布
-        if r.fusion_weights is not None:
-            plot_fusion_weights_distribution(
-                fusion_weights=r.fusion_weights,
-                node_degrees=r.node_degrees,
-                save_path=os.path.join(self.output_dir, "fusion_weights_distribution.png")
-            )
-            plt.close('all')
-            logging.info("  ✓ 融合权重分布已保存")
-            
-            # 2b. 融合权重分析
-            if r.node_degrees is not None:
-                try:
-                    plot_fusion_weights_analysis(
-                        fusion_weights=r.fusion_weights,
-                        node_degrees=r.node_degrees,
-                        fused_scores=r.fused_scores,
-                        save_path=os.path.join(self.output_dir, "fusion_weights_analysis.png")
-                    )
-                    plt.close('all')
-                    logging.info("  ✓ 融合权重分析已保存")
-                except Exception as e:
-                    logging.warning(f"  ⚠ 融合权重分析失败: {e}")
-        
-        # 3. 模型一致性分析
-        plot_model_agreement(
-            graph_scores=r.graph_scores,
-            tabular_scores=r.tabular_scores,
-            fused_scores=r.fused_scores,
-            top_k=self.top_k,
-            save_path=os.path.join(self.output_dir, "model_agreement.png")
-        )
-        plt.close('all')
-        logging.info("  ✓ 模型一致性已保存")
-    
-    def plot_feature_contribution(self):
-        """特征贡献可视化"""
-        logging.info("绘制特征贡献图 (3/5)...")
-        
-        r = self.results
-        
-        # 1. 特征重要性
-        if r.feature_names and r.tabular_features is not None:
-            plot_feature_importance(
-                tabular_features=r.tabular_features,
-                tabular_scores=r.tabular_scores,
-                feature_names=r.feature_names,
-                save_path=os.path.join(self.output_dir, "feature_importance.png")
-            )
-            plt.close('all')
-            logging.info("  ✓ 特征重要性已保存")
-        else:
-            logging.info("  - 跳过特征重要性 (缺少特征信息)")
-        
-        # 2. 模型贡献分析
-        plot_model_contribution(
-            graph_scores=r.graph_scores,
-            tabular_scores=r.tabular_scores,
-            fused_scores=r.fused_scores,
-            fusion_weights=r.fusion_weights,
-            node_degrees=r.node_degrees,
-            top_k=self.top_k,
-            save_path=os.path.join(self.output_dir, "model_contribution.png")
-        )
-        plt.close('all')
-        logging.info("  ✓ 模型贡献已保存")
-    
-    def plot_anomaly_distribution(self):
-        """异常分布可视化"""
-        logging.info("绘制异常分布图 (4/5)...")
-        
-        r = self.results
-        
-        # 1. 分数分布
-        plot_score_distributions(
-            graph_scores=r.graph_scores,
-            tabular_scores=r.tabular_scores,
-            fused_scores=r.fused_scores,
-            save_path=os.path.join(self.output_dir, "score_distributions.png")
-        )
-        plt.close('all')
-        logging.info("  ✓ 分数分布已保存")
-        
-        # 2. 异常散点图
-        plot_anomaly_scatter(
-            graph_scores=r.graph_scores,
-            tabular_scores=r.tabular_scores,
-            fused_scores=r.fused_scores,
-            top_k=self.top_k,
-            save_path=os.path.join(self.output_dir, "anomaly_scatter.png")
-        )
-        plt.close('all')
-        logging.info("  ✓ 异常散点图已保存")
-        
-        # 3. Top-K 分析
-        plot_topk_analysis(
-            graph_scores=r.graph_scores,
-            tabular_scores=r.tabular_scores,
-            fused_scores=r.fused_scores,
-            k_values=[100, 200, 500, 1000, 2000],
-            save_path=os.path.join(self.output_dir, "topk_analysis.png")
-        )
-        plt.close('all')
-        logging.info("  ✓ Top-K分析已保存")
-    
     def create_report(self):
-        """创建综合报告"""
-        logging.info("创建综合报告 (5/5)...")
-        
+        """
+        创建综合报告 - 统一的结构化输出
+        生成所有可视化图表，按类别组织到子目录中
+        """
         r = self.results
         
         create_comprehensive_report(
@@ -346,11 +183,11 @@ class VisualizationPipeline:
             graph_train_losses=r.graph_train_losses,
             fusion_weights=r.fusion_weights,
             node_degrees=r.node_degrees,
+            tabular_features=r.tabular_features,
+            feature_names=r.feature_names,
             fusion_strategy=r.fusion_strategy or "unknown",
             top_k=self.top_k
         )
-        plt.close('all')
-        logging.info("  ✓ 综合报告已保存")
 
 
 def main():
@@ -360,22 +197,30 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
-  # 使用默认参数可视化
+  # 使用默认参数可视化（推荐，生成结构化报告）
   python run_visualization.py --results ./output
   
   # 自定义 Top-K 和输出目录
   python run_visualization.py --results ./output --top-k 500 --output ./new_viz
   
-  # 只生成特定类型的图表
+  # 只生成特定类型的图表（高级用法）
   python run_visualization.py --results ./output --only performance fusion
+  
+注意:
+  默认会生成结构化的可视化报告，所有图表按类别组织在子目录中:
+  - 1_model_performance/    模型性能
+  - 2_fusion_analysis/      融合分析  
+  - 3_feature_contribution/ 特征贡献
+  - 4_anomaly_distribution/ 异常分布
+  - summary.png             总体摘要
 """
     )
     
     parser.add_argument(
         "--results",
         type=str,
-        required=True,
-        help="训练结果目录 (包含 training_results.pkl 或 fusion_scores.csv)"
+        default="./output",
+        help="训练结果目录 (默认: ./output, 包含 training_results.pkl 或 fusion_scores.csv)"
     )
     
     parser.add_argument(

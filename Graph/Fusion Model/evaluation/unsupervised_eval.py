@@ -45,6 +45,27 @@ class EvaluationReport:
     weak_rules: List[WeakRuleResult]
     score_distribution: Dict
     metadata: Dict
+    
+    def to_dict(self) -> Dict:
+        """转换为字典格式"""
+        return {
+            'stability': {
+                'jaccard_scores': self.stability.jaccard_scores,
+                'mean_jaccard': self.stability.mean_jaccard,
+                'std_jaccard': self.stability.std_jaccard,
+                'n_runs': self.stability.n_runs
+            } if self.stability else None,
+            'weak_rule_results': {
+                rule.rule_name: {
+                    'enrichment_ratio': rule.enrichment_ratio,
+                    'top_k_ratio': rule.topk_hit_rate,
+                    'population_rate': rule.population_rate,
+                    'lift': rule.lift
+                } for rule in self.weak_rules
+            },
+            'score_statistics': self.score_distribution,
+            'metadata': self.metadata
+        }
 
 
 class StabilityEvaluator:
