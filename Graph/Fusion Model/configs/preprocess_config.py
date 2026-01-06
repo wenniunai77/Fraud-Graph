@@ -34,8 +34,12 @@ class PreprocessConfig:
     # 时间特征列
     time_cols: List[int] = field(default_factory=lambda: [11, 12])
     
-    # 嵌入维度（用于类别特征）
-    embedding_dim: int = 8
+    # 嵌入维度配置（用于类别特征）
+    embedding_dim: int = 8  # 默认/最小 embedding 维度
+    use_adaptive_embedding_dim: bool = True  # 是否根据类别数量自适应调整维度
+    embedding_dim_multiplier: float = 0.25  # 维度计算公式: min(max_dim, int(num_categories ** multiplier))
+    max_embedding_dim: int = 32  # 最大 embedding 维度（避免高维稀疏）
+    min_embedding_dim: int = 4   # 最小 embedding 维度
     
     # ============ Embedding 预训练配置 ============
     use_pretrained_embeddings: bool = True  # 是否使用预训练 embedding

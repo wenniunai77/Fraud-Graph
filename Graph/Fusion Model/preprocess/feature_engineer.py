@@ -325,7 +325,7 @@ class FeatureEngineer:
             col_idx.mop: "mop"
         }
         
-        embedding_dim = self.config.embedding_dim
+        default_embedding_dim = self.config.embedding_dim
         all_embeddings = []
         feature_names = []
         encoding_info = {}
@@ -345,6 +345,18 @@ class FeatureEngineer:
             
             unique_values = col_data.unique()
             num_categories = len(unique_values)
+            
+            # 自适应计算 embedding 维度
+            if self.config.use_adaptive_embedding_dim:
+                # 使用公式: dim = min(max_dim, max(min_dim, int(num_categories ** multiplier)))
+                calculated_dim = int(num_categories ** self.config.embedding_dim_multiplier)
+                embedding_dim = min(
+                    self.config.max_embedding_dim,
+                    max(self.config.min_embedding_dim, calculated_dim)
+                )
+                logging.info(f"  {col_name}: {num_categories} 类别 -> {embedding_dim} 维 embedding")
+            else:
+                embedding_dim = default_embedding_dim
             
             category_to_idx = {val: idx for idx, val in enumerate(unique_values)}
             self.category_mappings[col_i] = category_to_idx
