@@ -33,7 +33,8 @@ class MaskedAttributePredictor(nn.Module):
         self,
         category_sizes: Dict[str, int],  # {field_name: num_categories}
         embedding_dim: int = 8,
-        hidden_dim: int = 64
+        hidden_dim: int = 64,
+        embedding_dims: Optional[Dict[str, int]] = None  # 自适应维度: {field_name: dim}
     ):
         super().__init__()
         
@@ -41,9 +42,14 @@ class MaskedAttributePredictor(nn.Module):
         self.embedding_dim = embedding_dim
         self.field_names = list(category_sizes.keys())
         
-        # 为每个类别字段创建 embedding
+        # 如果提供了自适应维度，使用它；否则使用统一维度
+        if embedding_dims is None:
+            embedding_dims = {field: embedding_dim for field in self.field_names}
+        self.embedding_dims = embedding_dims
+        
+        # 为每个类别字段创建 embedding（可能有不同维度）
         self.embeddings = nn.ModuleDict({
-            field: nn.Embedding(num_cat, embedding_dim)
+            field: nn.Embedding(num_cat, embedding_dims[field])
             for field, num_cat in category_sizes.items()
         })
         
@@ -52,7 +58,7 @@ class MaskedAttributePredictor(nn.Module):
             nn.init.xavier_uniform_(emb.weight)
         
         # 预测头：用所有字段的 embedding 拼接后预测被 mask 的字段
-        total_emb_dim = len(self.field_names) * embedding_dim
+        total_emb_dim = sum(embedding_dims.values())
         
         self.predictor = nn.Sequential(
             nn.Linear(total_emb_dim, hidden_dim),
@@ -227,9 +233,23 @@ class EmbeddingPretrainer:
         self,
         df: pd.DataFrame,
         categorical_cols: List[int],
-        col_name_map: Dict[int, str]
+        col_name_map: Dict[int, str],
+        use_adaptive_dim: bool = True,
+        dim_multiplier: float = 0.25,
+        max_dim: int = 32,
+        min_dim: int = 4
     ):
-        """训练 embedding"""
+        """训练 embedding
+        
+        Args:
+            df: 数据框
+            categorical_cols: 类别特征列索引
+            col_name_map: 列索引到名称的映射
+            use_adaptive_dim: 是否使用自适应维度
+            dim_multiplier: 维度计算的幂次（默认 0.25）
+            max_dim: 最大维度
+            min_dim: 最小维度
+        """
         logging.info("=" * 60)
         logging.info("开始 Embedding 预训练（Masked Attribute Modeling）")
         logging.info("=" * 60)
@@ -241,8 +261,21 @@ class EmbeddingPretrainer:
         num_samples = len(df)
         logging.info(f"总样本数: {num_samples:,}")
         logging.info(f"类别字段: {list(field_data.keys())}")
-        for field, mapping in category_mappings.items():
-            logging.info(f"  - {field}: {len(mapping)} 个类别")
+        
+        # 计算每个字段的 embedding 维度
+        category_sizes = {field: len(mapping) for field, mapping in category_mappings.items()}
+        
+        if use_adaptive_dim:
+            logging.info("使用自适应 embedding 维度:")
+            embedding_dims = {}
+            for field, num_cat in category_sizes.items():
+                calculated_dim = int(num_cat ** dim_multiplier)
+                dim = min(max_dim, max(min_dim, calculated_dim))
+                embedding_dims[field] = dim
+                logging.info(f"  - {field}: {num_cat} 类别 -> {dim} 维")
+        else:
+            logging.info(f"使用固定 embedding 维度: {self.config.embedding_dim}")
+            embedding_dims = {field: self.config.embedding_dim for field in category_sizes.keys()}
         
         # 划分训练/验证集
         val_size = int(num_samples * self.config.validation_split)
@@ -253,12 +286,13 @@ class EmbeddingPretrainer:
         
         logging.info(f"训练集: {train_size:,}, 验证集: {val_size:,}")
         
-        # 创建模型
-        category_sizes = {field: len(mapping) for field, mapping in category_mappings.items()}
+        # 创建模型（使用自适应或固定维度）
+        avg_emb_dim = int(np.mean(list(embedding_dims.values())))
         self.model = MaskedAttributePredictor(
             category_sizes=category_sizes,
             embedding_dim=self.config.embedding_dim,
-            hidden_dim=self.config.embedding_dim * 4
+            hidden_dim=avg_emb_dim * 4,
+            embedding_dims=embedding_dims  # 传入自适应维度
         ).to(self.device)
         
         logging.info(f"模型参数量: {sum(p.numel() for p in self.model.parameters()):,}")
@@ -392,6 +426,7 @@ class EmbeddingPretrainer:
                 for field, emb in self.model.embeddings.items()
             },
             "category_mappings": category_mappings,
+            "embedding_dims": self.model.embedding_dims,  # 保存每个字段的维度
             "config": {
                 "embedding_dim": self.config.embedding_dim,
                 "pretrain_method": self.config.pretrain_method

@@ -336,6 +336,7 @@ class FeatureEngineer:
             logging.info("使用预训练 embedding 权重")
             pretrained_emb_dict = pretrained_embeddings.get("embeddings", {})
             pretrained_mappings = pretrained_embeddings.get("category_mappings", {})
+            pretrained_dims = pretrained_embeddings.get("embedding_dims", {})  # 可能为空（旧版本）
         else:
             logging.info("使用随机初始化 embedding（未启用预训练）")
         
@@ -371,7 +372,14 @@ class FeatureEngineer:
                 pretrained_weight = pretrained_emb_dict[col_name]
                 pretrained_mapping = pretrained_mappings.get(col_name, {})
                 
-                # 对齐预训练权重到当前数据的类别映射
+                # 检查预训练维度
+                pretrained_dim = pretrained_weight.shape[1]
+                if pretrained_dim != embedding_dim:
+                    logging.warning(
+                        f"  ⚠ {col_name}: 预训练维度 {pretrained_dim} != 当前维度 {embedding_dim}"
+                    )
+                
+                # 对齐预训练权重到当前数据的类别映射和维度
                 aligned_weight = self._align_pretrained_embedding(
                     pretrained_weight,
                     pretrained_mapping,
@@ -379,7 +387,7 @@ class FeatureEngineer:
                     embedding_dim
                 )
                 embedding_layer.weight.data.copy_(aligned_weight)
-                logging.info(f"  ✓ {col_name}: 已加载预训练权重 ({num_categories} 类别)")
+                logging.info(f"  ✓ {col_name}: 已加载预训练权重 ({num_categories} 类别, {embedding_dim} 维)")
             else:
                 # 随机初始化
                 torch.nn.init.xavier_uniform_(embedding_layer.weight)
@@ -415,17 +423,60 @@ class FeatureEngineer:
         """
         对齐预训练 embedding 到当前数据的类别映射
         
-        对于当前数据中新出现的类别，使用随机初始化
+        处理两种情况：
+        1. 类别映射不同：新类别用随机初始化
+        2. 维度不同：截断或填充
+        
+        Args:
+            pretrained_weight: 预训练权重 [num_pretrained_cat, pretrained_dim]
+            pretrained_mapping: 预训练的类别映射
+            current_mapping: 当前数据的类别映射
+            embedding_dim: 目标 embedding 维度（当前配置的维度）
+        
+        Returns:
+            对齐后的权重 [num_current_cat, embedding_dim]
         """
         num_current_categories = len(current_mapping)
-        aligned_weight = torch.randn(num_current_categories, embedding_dim) * 0.01  # 新类别用小随机值
+        pretrained_dim = pretrained_weight.shape[1]
         
-        # 复制预训练权重
+        # 初始化目标权重（用小随机值）
+        aligned_weight = torch.randn(num_current_categories, embedding_dim) * 0.01
+        
+        # 处理维度不匹配
+        if pretrained_dim != embedding_dim:
+            logging.warning(
+                f"  ⚠ 预训练维度 ({pretrained_dim}) 与当前配置维度 ({embedding_dim}) 不匹配"
+            )
+            if pretrained_dim > embedding_dim:
+                logging.info(f"    → 截断预训练权重：{pretrained_dim} -> {embedding_dim}")
+                # 截断：只保留前 embedding_dim 维
+                dim_to_copy = embedding_dim
+            else:
+                logging.info(f"    → 填充预训练权重：{pretrained_dim} -> {embedding_dim}")
+                # 填充：复制所有维度，剩余部分保持随机初始化
+                dim_to_copy = pretrained_dim
+        else:
+            dim_to_copy = embedding_dim
+        
+        # 复制预训练权重（处理类别映射）
+        matched_count = 0
+        new_count = 0
+        
         for category, current_idx in current_mapping.items():
             if category in pretrained_mapping:
                 pretrained_idx = pretrained_mapping[category]
                 if pretrained_idx < pretrained_weight.shape[0]:
-                    aligned_weight[current_idx] = pretrained_weight[pretrained_idx]
+                    # 复制预训练权重（可能截断或部分填充）
+                    aligned_weight[current_idx, :dim_to_copy] = \
+                        pretrained_weight[pretrained_idx, :dim_to_copy]
+                    matched_count += 1
+            else:
+                # 新类别，保持随机初始化
+                new_count += 1
+        
+        logging.info(
+            f"    → 类别对齐: {matched_count} 个匹配, {new_count} 个新类别"
+        )
         
         return aligned_weight
     

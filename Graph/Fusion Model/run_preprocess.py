@@ -133,7 +133,11 @@ class PreprocessPipeline:
         trainer.train(
             df=self.df,
             categorical_cols=self.config.categorical_cols,
-            col_name_map=col_name_map
+            col_name_map=col_name_map,
+            use_adaptive_dim=self.config.use_adaptive_embedding_dim,
+            dim_multiplier=self.config.embedding_dim_multiplier,
+            max_dim=self.config.max_embedding_dim,
+            min_dim=self.config.min_embedding_dim
         )
         
         # 加载训练好的权重
