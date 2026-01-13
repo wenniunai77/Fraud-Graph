@@ -4,11 +4,10 @@
 import logging
 import pandas as pd
 import numpy as np
-from typing import Optional, Tuple, Dict, Any, TYPE_CHECKING
+from typing import Optional, Tuple, Dict, Any
 from pathlib import Path
 
-if TYPE_CHECKING:
-    from configs import PreprocessConfig
+from configs import PreprocessConfig
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s", 
@@ -44,14 +43,9 @@ class DataLoader:
         
         np.random.seed(self.config.random_seed)
         
-        if self.config.use_full_dataset:
-            logging.info("加载全量数据集...")
-            self.df = pd.read_csv(path, header=0)
-            logging.info(f"全量数据加载完成. Shape: {self.df.shape}")
-        else:
-            logging.info(f"加载采样数据集 ({self.config.sample_size} 行)...")
-            self.df = pd.read_csv(path, header=0, nrows=self.config.sample_size)
-            logging.info(f"采样数据加载完成. Shape: {self.df.shape}")
+        logging.info("加载全量数据集...")
+        self.df = pd.read_csv(path, header=0)
+        logging.info(f"数据加载完成. Shape: {self.df.shape}")
         
         self.raw_shape = self.df.shape
         
@@ -63,8 +57,6 @@ class DataLoader:
             "raw_rows": self.raw_shape[0],
             "raw_cols": self.raw_shape[1],
             "filtered_rows": self.df.shape[0],
-            "use_full_dataset": self.config.use_full_dataset,
-            "sample_size": self.config.sample_size if not self.config.use_full_dataset else None,
             "column_names": list(self.df.columns)
         }
         

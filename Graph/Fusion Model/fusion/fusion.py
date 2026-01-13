@@ -6,11 +6,10 @@ import logging
 import numpy as np
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import Dict, List, Optional, Tuple
 from scipy import stats
 
-if TYPE_CHECKING:
-    from configs import FusionConfig
+from configs import FusionConfig
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s", 

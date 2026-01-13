@@ -22,6 +22,7 @@ from configs import TrainingMainConfig
 from models import TabularAnomalyDetector, GraphAnomalyDetector
 from fusion import create_fusion_strategy, analyze_fusion, print_fusion_report
 from evaluation import UnsupervisedEvaluator
+from utils import set_seed  # 新增：导入统一的 seed 固化工具
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
@@ -158,10 +159,26 @@ class TrainingPipeline:
         logging.info("步骤 4: 融合分数")
         logging.info("=" * 60)
         
-        # 确保分数长度一致
-        min_len = min(len(self.tabular_scores), len(self.graph_scores))
-        tabular_scores = self.tabular_scores[:min_len]
-        graph_scores = self.graph_scores[:min_len]
+        # P3 修复: 严格检查分数长度一致性（不再悄悄截断）
+        if len(self.tabular_scores) != len(self.graph_scores):
+            error_msg = (
+                f"分数长度不一致！\n"
+                f"  表格分数: {len(self.tabular_scores)}\n"
+                f"  图分数: {len(self.graph_scores)}\n"
+                f"这可能是边过滤逻辑不一致导致的数据对齐错误。\n"
+                f"请检查:\n"
+                f"  1. 图侧和表格侧是否使用了相同的边数据\n"
+                f"  2. 是否有不一致的过滤/采样逻辑\n"
+                f"  3. original_edge_index 和 edge_index 的使用是否正确"
+            )
+            logging.error(error_msg)
+            raise ValueError(error_msg)
+        
+        tabular_scores = self.tabular_scores
+        graph_scores = self.graph_scores
+        num_edges = len(tabular_scores)
+        
+        logging.info(f"分数对齐检查通过: {num_edges} 条边")
         
         # 获取 per-edge 的节点度数（用于门控融合）
         # 使用 min(out_degree(src), in_degree(dst))，与边级分数对齐
@@ -179,8 +196,8 @@ class TrainingPipeline:
             in_degree = np.bincount(edge_index[1], minlength=num_nodes)
             
             # 每条边取 min(src 的 out-degree, dst 的 in-degree)
-            src_nodes = edge_index[0][:min_len]
-            dst_nodes = edge_index[1][:min_len]
+            src_nodes = edge_index[0][:num_edges]
+            dst_nodes = edge_index[1][:num_edges]
             edge_degrees = np.minimum(out_degree[src_nodes], in_degree[dst_nodes])
             
             logging.info(f"边级度数计算完成: min={edge_degrees.min()}, max={edge_degrees.max()}, "
@@ -216,20 +233,6 @@ class TrainingPipeline:
             return None
         
         self.evaluator = UnsupervisedEvaluator(self.eval_config)
-        
-        # 添加弱规则
-        col_idx = self.config.col_idx
-        payment_amount_idx = col_idx.payment_amount
-        
-        if payment_amount_idx < len(self.df.columns):
-            amount_col = self.df.columns[payment_amount_idx]
-            for p in [95, 99]:
-                threshold = np.percentile(self.df[amount_col], p)
-                def make_rule(thresh, col):
-                    def rule(data: pd.DataFrame) -> np.ndarray:
-                        return (data[col] >= thresh).values
-                    return rule
-                self.evaluator.add_weak_rule(f"large_amount_p{p}", make_rule(threshold, amount_col))
         
         # 评估
         df_subset = self.df.iloc[:len(self.fused_scores)]
@@ -493,10 +496,6 @@ class TrainingPipeline:
                 if 'score_statistics' in evaluation_report:
                     stats = evaluation_report['score_statistics']
                     f.write(f"  Top-K: {self.eval_config.top_k}\n")
-                if 'weak_rule_results' in evaluation_report:
-                    f.write(f"  弱规则匹配:\n")
-                    for rule_name, result in evaluation_report['weak_rule_results'].items():
-                        f.write(f"    {rule_name}: {result.get('top_k_ratio', 0)*100:.2f}%\n")
                 f.write("\n")
             
             # 输出文件
@@ -615,6 +614,10 @@ def main():
     config.train.epochs = args.epochs
     config.evaluation.top_k = args.top_k
     config.device = args.device
+    
+    # P2 修复: 统一设置随机种子（确保可复现）
+    set_seed(config.seed)
+    logging.info(f"随机种子已设置: {config.seed}")
     
     # 创建并运行流水线
     pipeline = TrainingPipeline(config)

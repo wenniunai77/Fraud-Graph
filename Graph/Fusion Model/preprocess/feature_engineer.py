@@ -5,11 +5,10 @@ import logging
 import numpy as np
 import pandas as pd
 import torch
-from typing import Dict, List, Tuple, Any, Optional, TYPE_CHECKING
+from typing import Dict, List, Tuple, Any, Optional
 from sklearn.preprocessing import StandardScaler
 
-if TYPE_CHECKING:
-    from configs import PreprocessConfig
+from configs import PreprocessConfig
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s", 
@@ -104,8 +103,21 @@ class FeatureEngineer:
         
         return edge_features, feature_names
     
-    def build_tabular_features(self, df: pd.DataFrame) -> Tuple[np.ndarray, List[str]]:
-        """构建表格特征（用于表格模型，不做嵌入，保留原始值）"""
+    def build_tabular_features(
+        self, 
+        df: pd.DataFrame,
+        pretrained_embeddings: Optional[Dict] = None
+    ) -> Tuple[np.ndarray, List[str]]:
+        """
+        构建表格特征（用于表格模型）
+        
+        P1 修复: 改为使用预训练 embedding 的聚合 (避免伪距离问题)
+        如果没有预训练 embedding，使用频次编码代替简单的 label encoding
+        
+        Args:
+            df: 数据框
+            pretrained_embeddings: 预训练的 embedding 字典（可选）
+        """
         logging.info("构建表格特征...")
         
         all_features = []
@@ -122,18 +134,106 @@ class FeatureEngineer:
             all_features.append(numeric_data)
             feature_names.append(col_name)
         
-        # 2. 类别特征（Label Encoding）
+        # 2. 类别特征 - 改进编码策略
+        use_pretrained = pretrained_embeddings is not None
+        
+        if use_pretrained:
+            logging.info("  类别特征: 使用预训练 embedding 聚合 (避免伪距离)")
+            pretrained_emb_dict = pretrained_embeddings.get("embeddings", {})
+            pretrained_mappings = pretrained_embeddings.get("category_mappings", {})
+        else:
+            logging.info("  类别特征: 使用频次编码 (避免伪距离)")
+        
+        col_name_map = {
+            col_idx.payment_channel: "payment_channel",
+            col_idx.debit_bic_code: "debit_bic_code",
+            col_idx.bene_bic_code: "bene_bic_code",
+            col_idx.instructed_currency: "instructed_currency",
+            col_idx.payment_currency: "payment_currency",
+            col_idx.credit_currency: "credit_currency",
+            col_idx.mop: "mop"
+        }
+        
         for col_i in self.config.categorical_cols:
-            col_data = df.iloc[:, col_i].astype(str).fillna('UNKNOWN')
-            col_name = self._get_col_name(col_i, "cat")
+            # P2 修复: 先 fillna 再 astype(str)，避免 NaN 变成字符串 "nan"
+            col_data = df.iloc[:, col_i].fillna('UNKNOWN').astype(str)
+            col_name = col_name_map.get(col_i, f"cat_col_{col_i}")
             
-            # 简单Label Encoding
-            unique_vals = col_data.unique()
-            val_to_idx = {v: i for i, v in enumerate(unique_vals)}
-            encoded = col_data.map(val_to_idx).values.reshape(-1, 1)
-            
-            all_features.append(encoded)
-            feature_names.append(col_name + "_encoded")
+            if use_pretrained and col_name in pretrained_emb_dict:
+                # 策略 A: 使用预训练 embedding 的统计聚合（避免伪距离）
+                pretrained_weight = pretrained_emb_dict[col_name]
+                pretrained_mapping = pretrained_mappings.get(col_name, {})
+                
+                # 获取 embedding 维度
+                emb_dim = pretrained_weight.shape[1]
+                
+                # P3 修复: 正确处理 OOV (Out-of-Vocabulary) 类别
+                # 优先找 'UNKNOWN' 的索引；若没有，用均值 embedding
+                unknown_idx = pretrained_mapping.get('UNKNOWN', None)
+                if unknown_idx is None:
+                    # 计算所有 embedding 的均值作为 OOV 表示
+                    if hasattr(pretrained_weight, 'numpy'):
+                        weight_np = pretrained_weight.numpy()
+                    else:
+                        weight_np = pretrained_weight.cpu().numpy()
+                    oov_embedding = weight_np.mean(axis=0)
+                    logging.warning(
+                        f"字段 {col_name} 的预训练映射中没有 'UNKNOWN'，"
+                        f"使用均值 embedding 作为 OOV 表示"
+                    )
+                else:
+                    oov_embedding = None  # 使用 UNKNOWN 索引
+                
+                # 映射到索引或 embedding
+                indices = []
+                oov_mask = []  # 标记哪些是 OOV
+                for val in col_data:
+                    if val in pretrained_mapping:
+                        indices.append(pretrained_mapping[val])
+                        oov_mask.append(False)
+                    elif unknown_idx is not None:
+                        indices.append(unknown_idx)
+                        oov_mask.append(False)
+                    else:
+                        indices.append(0)  # 临时占位，后面会替换为均值
+                        oov_mask.append(True)
+                
+                indices = np.array(indices)
+                oov_mask = np.array(oov_mask)
+                
+                # 提取 embedding
+                if hasattr(pretrained_weight, 'numpy'):
+                    embeddings = pretrained_weight.numpy()[indices]
+                else:
+                    embeddings = pretrained_weight.cpu().numpy()[indices]
+                
+                # 替换 OOV 位置为均值 embedding
+                if oov_embedding is not None and oov_mask.sum() > 0:
+                    embeddings[oov_mask] = oov_embedding
+                    logging.info(
+                        f"字段 {col_name}: {oov_mask.sum()} 个 OOV 类别使用均值 embedding"
+                    )
+                
+                # 添加 embedding 各维度作为特征
+                all_features.append(embeddings)
+                for i in range(emb_dim):
+                    feature_names.append(f"{col_name}_emb_{i}")
+            else:
+                # 策略 B: 使用频次编码 (frequency encoding) - 更适合无监督场景
+                # P2 修复: 按字母排序确保映射稳定
+                value_counts = col_data.value_counts()
+                freq_map = (value_counts / len(col_data)).to_dict()
+                
+                # 频次特征 (归一化到 [0,1])
+                freq_feature = col_data.map(freq_map).fillna(0).values.reshape(-1, 1)
+                all_features.append(freq_feature)
+                feature_names.append(f"{col_name}_freq")
+                
+                # 类别数量特征 (log-scaled)
+                count_feature = col_data.map(value_counts).fillna(0).values.reshape(-1, 1)
+                count_feature = np.log1p(count_feature)  # log(1+count) 避免极端值
+                all_features.append(count_feature)
+                feature_names.append(f"{col_name}_count")
         
         # 3. 时间特征
         for col_i in self.config.time_cols:
@@ -169,10 +269,12 @@ class FeatureEngineer:
         self.meta_info["tabular_features"] = {
             "shape": list(tabular_features.shape),
             "feature_names": feature_names,
-            "num_features": len(feature_names)
+            "num_features": len(feature_names),
+            "categorical_encoding": "embedding_aggregation" if use_pretrained else "frequency_encoding"
         }
         
         logging.info(f"表格特征构建完成. Shape: {tabular_features.shape}")
+        logging.info(f"  编码策略: {'预训练embedding聚合' if use_pretrained else '频次+计数编码'}")
         
         return tabular_features, feature_names
     
@@ -341,10 +443,12 @@ class FeatureEngineer:
             logging.info("使用随机初始化 embedding（未启用预训练）")
         
         for col_i in categorical_cols:
-            col_data = df.iloc[:, col_i].astype(str).fillna('UNKNOWN')
+            # P2 修复: 先 fillna 再 astype(str)，避免 NaN 变成字符串 "nan"
+            col_data = df.iloc[:, col_i].fillna('UNKNOWN').astype(str)
             col_name = col_name_map.get(col_i, f"cat_col_{col_i}")
             
-            unique_values = col_data.unique()
+            # P2 修复: 排序 unique 确保映射稳定
+            unique_values = sorted(col_data.unique())
             num_categories = len(unique_values)
             
             # 自适应计算 embedding 维度

@@ -9,11 +9,10 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Dict, List, Tuple, Optional, TYPE_CHECKING
+from typing import Dict, List, Tuple, Optional
 from tqdm import tqdm
 
-if TYPE_CHECKING:
-    from configs.embedding_config import EmbeddingPretrainConfig
+from configs.embedding_config import EmbeddingPretrainConfig
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
@@ -161,7 +160,7 @@ class MaskedAttributePredictor(nn.Module):
 class EmbeddingPretrainer:
     """Embedding 预训练器"""
     
-    def __init__(self, config: "EmbeddingPretrainConfig"):
+    def __init__(self, config: EmbeddingPretrainConfig):
         self.config = config
         self.model: Optional[MaskedAttributePredictor] = None
         self.optimizer = None
@@ -179,6 +178,8 @@ class EmbeddingPretrainer:
         """
         准备训练数据
         
+        P2 修复: 排序 unique 确保映射稳定（跨次运行一致）
+        
         Returns:
             - field_data: {field_name: [num_samples] 类别索引}
             - category_mappings: {field_name: {category_value: index}}
@@ -187,11 +188,12 @@ class EmbeddingPretrainer:
         category_mappings = {}
         
         for col_i in categorical_cols:
-            col_data = df.iloc[:, col_i].astype(str).fillna('UNKNOWN')
+            # P2 修复: 先 fillna 再 astype(str)，避免 NaN 变成字符串 "nan"
+            col_data = df.iloc[:, col_i].fillna('UNKNOWN').astype(str)
             field_name = col_name_map.get(col_i, f"col_{col_i}")
             
-            # 构建类别映射
-            unique_values = col_data.unique()
+            # 构建类别映射（排序确保稳定性）
+            unique_values = sorted(col_data.unique())  # P2: 排序确保稳定
             cat_to_idx = {val: idx for idx, val in enumerate(unique_values)}
             
             # 转换为索引

@@ -21,6 +21,7 @@ from configs import PreprocessConfig
 from configs.embedding_config import EmbeddingPretrainConfig
 from preprocess import DataLoader, FeatureEngineer, GraphBuilder
 from preprocess.train_embeddings import EmbeddingPretrainer, load_pretrained_embeddings
+from utils import set_seed  # 新增：导入统一的 seed 固化工具
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
@@ -66,7 +67,7 @@ class PreprocessPipeline:
         self.meta_info["data_info"] = self.data_loader.meta_info
         logging.info(f"数据加载完成: {len(self.df):,} 行, {len(self.df.columns)} 列")
     
-    def build_features(self):
+    def build_features(self, pretrained_embeddings: Optional[Dict] = None):
         """构建特征"""
         logging.info("=" * 60)
         logging.info("步骤 2: 特征工程")
@@ -74,10 +75,10 @@ class PreprocessPipeline:
         
         self.feature_engineer = FeatureEngineer(self.config)
         
-        # 构建表格特征
+        # 构建表格特征（传入预训练 embedding 以便更好地编码）
         logging.info("构建表格特征...")
         self.tabular_features, self.tabular_feature_names = \
-            self.feature_engineer.build_tabular_features(self.df)
+            self.feature_engineer.build_tabular_features(self.df, pretrained_embeddings)
         logging.info(f"表格特征: {self.tabular_features.shape}")
         
         self.meta_info["tabular_info"] = {
@@ -267,8 +268,6 @@ class PreprocessPipeline:
             "categorical_cols": self.config.categorical_cols,
             "time_cols": self.config.time_cols,
             "embedding_dim": self.config.embedding_dim,
-            "use_full_dataset": self.config.use_full_dataset,
-            "sample_size": self.config.sample_size,
             "random_seed": self.config.random_seed,
             "add_self_loops": self.config.add_self_loops
         }
@@ -300,15 +299,19 @@ class PreprocessPipeline:
         start_time = datetime.now()
         logging.info(f"\n开始预处理流水线 - {start_time}")
         
+        # P2 修复: 统一设置随机种子（确保可复现）
+        set_seed(self.config.random_seed)
+        logging.info(f"随机种子已设置: {self.config.random_seed}")
+        
         try:
             # 1. 加载数据
             self.load_data(data_path)
             
-            # 2. 构建表格特征
-            self.build_features()
-            
-            # 3. 预训练 embedding（如果需要）
+            # 2. 预训练 embedding（如果需要） - 调整顺序，先预训练
             pretrained_embeddings = self.pretrain_embeddings_if_needed()
+            
+            # 3. 构建特征（传入预训练 embedding）
+            self.build_features(pretrained_embeddings)
             
             # 4. 构建图（传入预训练 embedding）
             self.build_graph(pretrained_embeddings)
@@ -346,13 +349,6 @@ def main():
     )
     
     parser.add_argument(
-        "--sample-size",
-        type=int,
-        default=None,
-        help="采样大小（默认使用全量数据）"
-    )
-    
-    parser.add_argument(
         "--seed",
         type=int,
         default=42,
@@ -373,10 +369,6 @@ def main():
     config.output_dir = args.output
     config.random_seed = args.seed
     config.add_self_loops = not args.no_self_loops
-    
-    if args.sample_size:
-        config.use_full_dataset = False
-        config.sample_size = args.sample_size
     
     # 运行预处理
     pipeline = PreprocessPipeline(config)

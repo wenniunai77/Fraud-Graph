@@ -8,13 +8,12 @@ import torch
 import pickle
 import json
 import os
-from typing import Dict, Tuple, Optional, Any, TYPE_CHECKING
+from typing import Dict, Tuple, Optional, Any
 
 from torch_geometric.data import Data
 from torch_geometric.utils import add_self_loops, degree
 
-if TYPE_CHECKING:
-    from configs import PreprocessConfig
+from configs import PreprocessConfig
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s", 
@@ -122,9 +121,25 @@ class GraphBuilder:
             edge_index_with_loops, _ = add_self_loops(edge_index, num_nodes=self.num_nodes)
             num_edges_with_loops = edge_index_with_loops.shape[1]
             logging.info(f"添加自环: {num_original_edges:,} -> {num_edges_with_loops:,} 边")
+            
+            # P0 修复: 自环时同步扩展 edge_attr
+            if edge_features is not None:
+                num_self_loops = num_edges_with_loops - num_original_edges
+                edge_feature_dim = edge_features.shape[1]
+                
+                # 为自环创建零特征（语义：自环没有交易信息）
+                self_loop_features = torch.zeros(num_self_loops, edge_feature_dim, dtype=edge_features.dtype)
+                
+                # 拼接：原始边特征 + 自环特征
+                edge_features_with_loops = torch.cat([edge_features, self_loop_features], dim=0)
+                
+                logging.info(f"  边特征对齐: {edge_features.shape} -> {edge_features_with_loops.shape}")
+            else:
+                edge_features_with_loops = None
         else:
             edge_index_with_loops = edge_index
             num_edges_with_loops = num_original_edges
+            edge_features_with_loops = edge_features
         
         # 计算边权重（归一化）
         row, col = edge_index_with_loops
@@ -141,26 +156,32 @@ class GraphBuilder:
             num_nodes=self.num_nodes
         )
         
-        if edge_features is not None:
-            data.edge_attr = edge_features
+        if edge_features_with_loops is not None:
+            data.edge_attr = edge_features_with_loops
+            
+            # 安全检查：确保 edge_index 与 edge_attr 维度对齐
+            assert data.edge_index.shape[1] == data.edge_attr.shape[0], \
+                f"边索引与边特征维度不一致: edge_index={data.edge_index.shape[1]} vs edge_attr={data.edge_attr.shape[0]}"
         
         self.meta_info["graph_info"].update({
             "num_nodes": self.num_nodes,
             "num_edges_original": num_original_edges,
             "num_edges_with_loops": num_edges_with_loops,
             "num_node_features": node_features.shape[1],
-            "num_edge_features": edge_features.shape[1] if edge_features is not None else 0,
+            "num_edge_features": edge_features_with_loops.shape[1] if edge_features_with_loops is not None else 0,
             "has_self_loops": add_self_loop,
             "has_edge_weight": True,
-            "has_edge_attr": edge_features is not None
+            "has_edge_attr": edge_features_with_loops is not None,
+            "edge_attr_aligned": add_self_loop and edge_features is not None  # 新增：标记是否做了对齐
         })
         
         logging.info(f"PyG Data 对象构建完成:")
         logging.info(f"  - 节点数: {data.num_nodes:,}")
         logging.info(f"  - 边数（含自环）: {data.edge_index.shape[1]:,}")
         logging.info(f"  - 节点特征维度: {data.x.shape[1]}")
-        if edge_features is not None:
-            logging.info(f"  - 边特征维度: {edge_features.shape[1]}")
+        if edge_features_with_loops is not None:
+            logging.info(f"  - 边特征维度: {edge_features_with_loops.shape[1]}")
+            logging.info(f"  - 边特征总数: {edge_features_with_loops.shape[0]}")
         
         return data
     

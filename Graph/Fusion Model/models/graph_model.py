@@ -12,10 +12,9 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Dict, Optional, Tuple, List, TYPE_CHECKING
+from typing import Dict, Optional, Tuple, List
 
-if TYPE_CHECKING:
-    from configs import GraphModelConfig, TrainConfig
+from configs import GraphModelConfig, TrainConfig
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s", 
@@ -39,6 +38,31 @@ def cosine_error(x: torch.Tensor, recon: torch.Tensor) -> torch.Tensor:
     recon_norm = F.normalize(recon, p=2, dim=-1)
     cos_sim = (x_norm * recon_norm).sum(dim=-1)
     return 1 - cos_sim  # 误差 = 1 - 相似度
+
+
+def drop_edge(edge_index: torch.Tensor, p: float = 0.0) -> torch.Tensor:
+    """
+    DropEdge: 随机丢弃边以增强模型鲁棒性
+    
+    Args:
+        edge_index: 边索引 [2, num_edges]
+        p: 丢弃概率，0 表示不丢弃
+        
+    Returns:
+        处理后的边索引
+    """
+    if p <= 0.0:
+        return edge_index
+    
+    num_edges = edge_index.size(1)
+    # 生成保留掩码
+    keep_mask = torch.rand(num_edges, device=edge_index.device) >= p
+    
+    # 确保至少保留一条边
+    if keep_mask.sum() == 0:
+        keep_mask[0] = True
+    
+    return edge_index[:, keep_mask]
 
 
 # ==================== 工具函数 ====================
@@ -213,11 +237,12 @@ class GraphMAE(nn.Module):
     Graph Masked Autoencoder
     
     对齐 graph_main 实现，支持:
-    - 可配置的 encoder/decoder 类型
+    - GAT encoder (固定)
+    - MLP/GAT decoder
     - Batch/Layer Normalization
     - 残差连接
-    - MLP 解码器选项
-    - Cosine 重构误差
+    - DropEdge 数据增强
+    - Cosine 重构误差 (SCE loss)
     - 多次采样异常分数计算
     """
     
@@ -238,6 +263,7 @@ class GraphMAE(nn.Module):
         decoder_type: str = "mlp",  # "mlp" or "gat"
         mask_rate: float = 0.5,
         replace_rate: float = 0.1,
+        drop_edge_rate: float = 0.0,  # DropEdge 概率
         alpha_l: float = 2.0
     ):
         super().__init__()
@@ -248,6 +274,7 @@ class GraphMAE(nn.Module):
         self.mask_rate = mask_rate
         self.replace_rate = replace_rate
         self.mask_token_rate = 1 - replace_rate
+        self.drop_edge_rate = drop_edge_rate
         self.alpha_l = alpha_l
         self.decoder_type = decoder_type.lower()
         
@@ -293,7 +320,7 @@ class GraphMAE(nn.Module):
             )
         
         logging.info(f"GraphMAE 初始化: encoder=GAT, decoder={self.decoder_type}, "
-                    f"norm={norm}, residual={residual}")
+                    f"norm={norm}, residual={residual}, drop_edge_rate={drop_edge_rate}")
     
     def encoding_mask_noise(
         self, 
@@ -345,10 +372,19 @@ class GraphMAE(nn.Module):
             return self.decoder(rep, edge_index)
     
     def forward(self, data, x: Optional[torch.Tensor] = None):
-        """前向传播（训练）"""
+        """前向传播（训练）
+        
+        训练时会应用:
+        1. DropEdge: 随机丢弃边以增强鲁棒性
+        2. Mask: 随机遮盖节点特征
+        """
         if x is None:
             x = data.x
         edge_index = data.edge_index
+        
+        # DropEdge: 训练时随机丢弃边
+        if self.training and self.drop_edge_rate > 0:
+            edge_index = drop_edge(edge_index, p=self.drop_edge_rate)
         
         # Mask
         use_x, (mask_nodes, keep_nodes) = self.encoding_mask_noise(x, self.mask_rate)
@@ -449,8 +485,8 @@ class GraphAnomalyDetector:
     
     def __init__(
         self,
-        config: "GraphModelConfig",
-        train_config: "TrainConfig",
+        config: GraphModelConfig,
+        train_config: TrainConfig,
         device: str = "cpu"
     ):
         self.config = config
@@ -482,6 +518,7 @@ class GraphAnomalyDetector:
             decoder_type=getattr(self.config, 'decoder_type', 'mlp'),
             mask_rate=self.config.mask_rate,
             replace_rate=self.config.replace_rate,
+            drop_edge_rate=getattr(self.config, 'drop_edge_rate', 0.0),
             alpha_l=self.config.alpha_l
         ).to(self.device)
         

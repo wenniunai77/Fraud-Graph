@@ -46,9 +46,7 @@ class PreprocessConfig:
     pretrained_embedding_path: str = "./processed_data/pretrained_embeddings.pt"  # 预训练权重路径
     train_embeddings_if_not_exist: bool = True  # 如果预训练权重不存在，是否自动训练
     
-    # 采样设置
-    use_full_dataset: bool = True
-    sample_size: int = 500000
+    # 随机种子
     random_seed: int = 42
     
     # 图构建选项

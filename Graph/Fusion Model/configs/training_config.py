@@ -41,9 +41,14 @@ class TabularModelConfig:
 # ==================== 图模型配置 ====================
 @dataclass
 class GraphModelConfig:
-    """图模型（GraphMAE）配置"""
-    encoder_type: str = "gat"
-    decoder_type: str = "gat"
+    """图模型（GraphMAE）配置
+    
+    注意: 
+    - encoder 固定使用 GAT（不支持切换）
+    - loss 固定使用 SCE（不支持切换）
+    """
+    # decoder_type 已实现：支持 "gat" 和 "mlp"
+    decoder_type: str = "mlp"  # 解码器类型: "gat" 或 "mlp" (推荐 mlp，速度更快)
     
     hidden_channels: int = 256
     out_channels: int = 128
@@ -51,23 +56,20 @@ class GraphModelConfig:
     decoder_layers: int = 1
     
     num_heads: int = 4
-    num_out_heads: int = 1
-    concat_hidden: bool = False
     
     dropout: float = 0.2
     attn_drop: float = 0.1
     negative_slope: float = 0.2
     
     residual: bool = False
-    norm: Optional[str] = None
+    norm: Optional[str] = None  # 支持 "batch", "layer" 或 None
     activation: str = "prelu"
     
     mask_rate: float = 0.5
     replace_rate: float = 0.1
-    drop_edge_rate: float = 0.0
+    drop_edge_rate: float = 0.0  # 边 dropout 率，训练时随机丢弃边以增强鲁棒性
     
-    loss_fn: str = "sce"
-    alpha_l: float = 2.0
+    alpha_l: float = 2.0  # SCE loss 的 alpha 参数
 
 
 # ==================== 训练配置 ====================
@@ -134,14 +136,6 @@ class EvaluationConfig:
     stability_k_values: List[int] = field(default_factory=lambda: [100, 500, 1000])
     stability_jaccard_k: int = 100
     
-    # 弱规则定义
-    weak_rules: List[tuple] = field(default_factory=lambda: [
-        ("payment_amount", ">", "p99", "极端大额"),
-        ("payment_amount", "<", "p1", "极端小额"),
-        ("time_diff_seconds", ">", "p99", "极端时延"),
-        ("time_diff_seconds", "<", "p1", "极端短时延"),
-    ])
-    
     # 阈值校准
     threshold_percentiles: List[float] = field(default_factory=lambda: [90.0, 95.0, 99.0, 99.5])
 
@@ -157,7 +151,7 @@ class TrainingMainConfig:
     output_dir: str = "./output"
     checkpoint_dir: str = "./checkpoints"
     
-    # 列索引（用于评估时的弱规则）
+    # 列索引
     col_idx: ColumnIndex = field(default_factory=ColumnIndex)
     
     # 子配置
