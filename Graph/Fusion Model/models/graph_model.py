@@ -234,7 +234,7 @@ class GATEncoder(nn.Module):
 
 class GraphMAE(nn.Module):
     """
-    Graph Masked Autoencoder
+    GraphMAE (Graph Masked Autoencoder)
     
     对齐 graph_main 实现，支持:
     - GAT encoder (固定)

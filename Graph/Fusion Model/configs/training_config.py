@@ -163,7 +163,9 @@ class TrainingMainConfig:
     
     # 运行配置
     device: int = 0  # GPU设备号，-1表示CPU
-    seed: int = 42
+    seed: int = 42  # 单 seed 模式时使用
+    seeds: List[int] = field(default_factory=lambda: [42])  # 多 seed 模式：配置多个种子
+    enable_multi_seed: bool = False  # 是否启用多 seed 模式
     
     # 输出控制
     save_model: bool = True

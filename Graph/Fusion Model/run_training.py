@@ -2,6 +2,7 @@
 模型训练主脚本
 读取预处理完成的图数据和表格特征
 训练图模型和表格模型，进行融合和评估
+支持单 seed 或多 seed 模式，自动输出稳定性分析
 """
 import argparse
 import logging
@@ -13,7 +14,7 @@ import numpy as np
 import pandas as pd
 import torch
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 # 添加当前目录到路径
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -22,7 +23,7 @@ from configs import TrainingMainConfig
 from models import TabularAnomalyDetector, GraphAnomalyDetector
 from fusion import create_fusion_strategy, analyze_fusion, print_fusion_report
 from evaluation import UnsupervisedEvaluator
-from utils import set_seed  # 新增：导入统一的 seed 固化工具
+from utils import set_seed, compute_topk_overlap  # 新增：导入统一的 seed 固化工具
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
@@ -358,12 +359,38 @@ class TrainingPipeline:
         if self.df is not None:
             topk_idx = np.argsort(-self.fused_scores)[:self.eval_config.top_k]
             topk_df = self.df.iloc[topk_idx].copy()
-            topk_df["fused_score"] = self.fused_scores[topk_idx]
+            
+            # 添加分数和排名信息
             topk_df["rank"] = range(1, len(topk_idx) + 1)
+            topk_df["fused_score"] = self.fused_scores[topk_idx]
+            topk_df["graph_score"] = self.graph_scores[topk_idx]
+            topk_df["tabular_score"] = self.tabular_scores[topk_idx]
+            
+            # 添加融合权重（门控融合时可用）
+            if self.fusion_result.fusion_weights is not None:
+                topk_df["fusion_weight"] = self.fusion_result.fusion_weights[topk_idx]
+            
+            # 添加节点度数代理（活跃度指标，用于解释为什么更信图/表）
+            if hasattr(self.graph_data, 'edge_index'):
+                if hasattr(self.graph_data, 'original_edge_index'):
+                    edge_index = self.graph_data.original_edge_index.cpu().numpy()
+                else:
+                    edge_index = self.graph_data.edge_index.cpu().numpy()
+                
+                num_nodes = self.graph_data.num_nodes
+                out_degree = np.bincount(edge_index[0], minlength=num_nodes)
+                in_degree = np.bincount(edge_index[1], minlength=num_nodes)
+                
+                src_nodes = edge_index[0][topk_idx]
+                dst_nodes = edge_index[1][topk_idx]
+                node_degree_proxy = np.minimum(out_degree[src_nodes], in_degree[dst_nodes])
+                
+                topk_df["node_degree_proxy"] = node_degree_proxy
             
             topk_path = os.path.join(output_dir, f"top_{self.eval_config.top_k}_anomalies.csv")
             topk_df.to_csv(topk_path, index=False)
             logging.info(f"Top-K 结果已保存: {topk_path}")
+            logging.info(f"  包含字段: {list(topk_df.columns)}")
         
         # ============= 4. 保存模型 =============
         if self.config.save_model:
@@ -615,13 +642,279 @@ def main():
     config.evaluation.top_k = args.top_k
     config.device = args.device
     
-    # P2 修复: 统一设置随机种子（确保可复现）
-    set_seed(config.seed)
-    logging.info(f"随机种子已设置: {config.seed}")
+    # ==================== 多 Seed 模式 ====================
+    if config.enable_multi_seed and len(config.seeds) > 1:
+        logging.info("=" * 80)
+        logging.info(f"🔄 多 Seed 模式: 将运行 {len(config.seeds)} 个 seed")
+        logging.info(f"Seeds: {config.seeds}")
+        logging.info("=" * 80)
+        
+        run_multi_seed_training(config)
     
-    # 创建并运行流水线
-    pipeline = TrainingPipeline(config)
-    pipeline.run()
+    # ==================== 单 Seed 模式 ====================
+    else:
+        # P2 修复: 统一设置随机种子（确保可复现）
+        set_seed(config.seed)
+        logging.info(f"随机种子已设置: {config.seed}")
+        
+        # 创建并运行流水线
+        pipeline = TrainingPipeline(config)
+        pipeline.run()
+
+
+def run_multi_seed_training(config: TrainingMainConfig):
+    """
+    多 Seed 训练并输出稳定性分析
+    
+    Args:
+        config: 训练配置
+    """
+    seeds = config.seeds
+    n_seeds = len(seeds)
+    
+    # 存储每个 seed 的结果
+    all_fused_scores = []
+    all_graph_scores = []
+    all_tabular_scores = []
+    all_topk_indices = []
+    
+    # 为每个 seed 创建独立输出目录
+    base_output_dir = config.output_dir
+    seed_output_dirs = []
+    
+    for i, seed in enumerate(seeds):
+        logging.info("\n" + "=" * 80)
+        logging.info(f"🌱 运行 Seed {i+1}/{n_seeds}: {seed}")
+        logging.info("=" * 80)
+        
+        # 设置随机种子
+        set_seed(seed)
+        
+        # 创建该 seed 的输出目录
+        seed_output_dir = os.path.join(base_output_dir, f"seed_{seed}")
+        os.makedirs(seed_output_dir, exist_ok=True)
+        seed_output_dirs.append(seed_output_dir)
+        
+        # 临时修改配置的输出目录
+        original_output_dir = config.output_dir
+        config.output_dir = seed_output_dir
+        
+        # 运行训练
+        pipeline = TrainingPipeline(config)
+        pipeline.run()
+        
+        # 恢复原始输出目录
+        config.output_dir = original_output_dir
+        
+        # 保存该 seed 的分数
+        all_fused_scores.append(pipeline.fused_scores)
+        all_graph_scores.append(pipeline.graph_scores)
+        all_tabular_scores.append(pipeline.tabular_scores)
+        
+        # 保存 Top-K 索引
+        topk_idx = np.argsort(-pipeline.fused_scores)[:config.evaluation.top_k]
+        all_topk_indices.append(set(topk_idx))
+        
+        logging.info(f"✅ Seed {seed} 完成，结果已保存到: {seed_output_dir}")
+    
+    # ==================== 生成稳定性分析 ====================
+    logging.info("\n" + "=" * 80)
+    logging.info("📊 生成跨 Seed 稳定性分析")
+    logging.info("=" * 80)
+    
+    analyze_multi_seed_results(
+        config=config,
+        seeds=seeds,
+        all_fused_scores=all_fused_scores,
+        all_graph_scores=all_graph_scores,
+        all_tabular_scores=all_tabular_scores,
+        all_topk_indices=all_topk_indices,
+        output_dir=base_output_dir
+    )
+    
+    logging.info("\n" + "=" * 80)
+    logging.info(f"✅ 所有 {n_seeds} 个 Seed 训练完成！")
+    logging.info(f"📂 结果保存在: {base_output_dir}")
+    logging.info("=" * 80)
+
+
+def analyze_multi_seed_results(
+    config: TrainingMainConfig,
+    seeds: List[int],
+    all_fused_scores: List[np.ndarray],
+    all_graph_scores: List[np.ndarray],
+    all_tabular_scores: List[np.ndarray],
+    all_topk_indices: List[set],
+    output_dir: str
+):
+    """
+    分析多 seed 结果的稳定性
+    
+    Args:
+        config: 训练配置
+        seeds: seed 列表
+        all_fused_scores: 所有 seed 的融合分数
+        all_graph_scores: 所有 seed 的图分数
+        all_tabular_scores: 所有 seed 的表格分数
+        all_topk_indices: 所有 seed 的 Top-K 索引集合
+        output_dir: 输出目录
+    """
+    n_seeds = len(seeds)
+    k_values = config.evaluation.top_k_values
+    
+    # ==================== 1. 计算 Jaccard 相似度 ====================
+    logging.info("计算 Top-K Jaccard 相似度...")
+    
+    jaccard_results = {
+        'fused': compute_topk_overlap(all_fused_scores[0], all_fused_scores[1], k_values) if n_seeds >= 2 else {},
+        'graph': compute_topk_overlap(all_graph_scores[0], all_graph_scores[1], k_values) if n_seeds >= 2 else {},
+        'tabular': compute_topk_overlap(all_tabular_scores[0], all_tabular_scores[1], k_values) if n_seeds >= 2 else {}
+    }
+    
+    # 计算所有配对的平均相似度
+    jaccard_matrix_fused = np.zeros((n_seeds, n_seeds))
+    jaccard_matrix_graph = np.zeros((n_seeds, n_seeds))
+    jaccard_matrix_tabular = np.zeros((n_seeds, n_seeds))
+    
+    for i in range(n_seeds):
+        for j in range(i + 1, n_seeds):
+            # 使用主 K 值计算
+            k = config.evaluation.top_k
+            
+            # 融合分数
+            topk_i = set(np.argsort(-all_fused_scores[i])[:k])
+            topk_j = set(np.argsort(-all_fused_scores[j])[:k])
+            jaccard_fused = len(topk_i & topk_j) / k
+            jaccard_matrix_fused[i, j] = jaccard_fused
+            jaccard_matrix_fused[j, i] = jaccard_fused
+            
+            # 图分数
+            topk_i = set(np.argsort(-all_graph_scores[i])[:k])
+            topk_j = set(np.argsort(-all_graph_scores[j])[:k])
+            jaccard_graph = len(topk_i & topk_j) / k
+            jaccard_matrix_graph[i, j] = jaccard_graph
+            jaccard_matrix_graph[j, i] = jaccard_graph
+            
+            # 表格分数
+            topk_i = set(np.argsort(-all_tabular_scores[i])[:k])
+            topk_j = set(np.argsort(-all_tabular_scores[j])[:k])
+            jaccard_tabular = len(topk_i & topk_j) / k
+            jaccard_matrix_tabular[i, j] = jaccard_tabular
+            jaccard_matrix_tabular[j, i] = jaccard_tabular
+    
+    # 保存 Jaccard 矩阵
+    jaccard_df = pd.DataFrame({
+        'seed_i': [],
+        'seed_j': [],
+        'jaccard_fused': [],
+        'jaccard_graph': [],
+        'jaccard_tabular': []
+    })
+    
+    for i in range(n_seeds):
+        for j in range(i + 1, n_seeds):
+            jaccard_df = pd.concat([jaccard_df, pd.DataFrame({
+                'seed_i': [seeds[i]],
+                'seed_j': [seeds[j]],
+                'jaccard_fused': [jaccard_matrix_fused[i, j]],
+                'jaccard_graph': [jaccard_matrix_graph[i, j]],
+                'jaccard_tabular': [jaccard_matrix_tabular[i, j]]
+            })], ignore_index=True)
+    
+    jaccard_path = os.path.join(output_dir, "jaccard_similarity.csv")
+    jaccard_df.to_csv(jaccard_path, index=False)
+    logging.info(f"✅ Jaccard 相似度已保存: {jaccard_path}")
+    
+    # 计算平均相似度（只取上三角）
+    avg_jaccard_fused = jaccard_matrix_fused[np.triu_indices(n_seeds, k=1)].mean()
+    avg_jaccard_graph = jaccard_matrix_graph[np.triu_indices(n_seeds, k=1)].mean()
+    avg_jaccard_tabular = jaccard_matrix_tabular[np.triu_indices(n_seeds, k=1)].mean()
+    
+    logging.info(f"平均 Jaccard 相似度 (Top-{config.evaluation.top_k}):")
+    logging.info(f"  融合模型: {avg_jaccard_fused:.3f}")
+    logging.info(f"  图模型:   {avg_jaccard_graph:.3f}")
+    logging.info(f"  表格模型: {avg_jaccard_tabular:.3f}")
+    
+    # ==================== 2. 找出稳定检测的节点 ====================
+    logging.info("\n查找稳定检测的异常节点...")
+    
+    # 所有 seed 的 Top-K 交集
+    stable_nodes = set.intersection(*all_topk_indices)
+    logging.info(f"稳定节点数量 (所有 {n_seeds} 个 seed 都识别): {len(stable_nodes)}")
+    
+    # 至少被 n-1 个 seed 识别的节点
+    node_counts = {}
+    for topk_set in all_topk_indices:
+        for node in topk_set:
+            node_counts[node] = node_counts.get(node, 0) + 1
+    
+    high_confidence_nodes = {node for node, count in node_counts.items() if count >= n_seeds - 1}
+    logging.info(f"高置信节点 (至少 {n_seeds-1}/{n_seeds} 个 seed 识别): {len(high_confidence_nodes)}")
+    
+    # 保存稳定节点列表
+    stable_df = pd.DataFrame({
+        'node_index': list(stable_nodes),
+        'detection_count': n_seeds
+    })
+    
+    stable_path = os.path.join(output_dir, "stable_anomalies.csv")
+    stable_df.to_csv(stable_path, index=False)
+    logging.info(f"✅ 稳定节点列表已保存: {stable_path}")
+    
+    # ==================== 3. 生成汇总报告 ====================
+    summary = {
+        'n_seeds': n_seeds,
+        'seeds': seeds,
+        'top_k': config.evaluation.top_k,
+        'jaccard_similarity': {
+            'fused': {
+                'mean': float(avg_jaccard_fused),
+                'std': float(jaccard_matrix_fused[np.triu_indices(n_seeds, k=1)].std()),
+                'min': float(jaccard_matrix_fused[np.triu_indices(n_seeds, k=1)].min()),
+                'max': float(jaccard_matrix_fused[np.triu_indices(n_seeds, k=1)].max())
+            },
+            'graph': {
+                'mean': float(avg_jaccard_graph),
+                'std': float(jaccard_matrix_graph[np.triu_indices(n_seeds, k=1)].std()),
+                'min': float(jaccard_matrix_graph[np.triu_indices(n_seeds, k=1)].min()),
+                'max': float(jaccard_matrix_graph[np.triu_indices(n_seeds, k=1)].max())
+            },
+            'tabular': {
+                'mean': float(avg_jaccard_tabular),
+                'std': float(jaccard_matrix_tabular[np.triu_indices(n_seeds, k=1)].std()),
+                'min': float(jaccard_matrix_tabular[np.triu_indices(n_seeds, k=1)].min()),
+                'max': float(jaccard_matrix_tabular[np.triu_indices(n_seeds, k=1)].max())
+            }
+        },
+        'stable_nodes': {
+            'all_seeds': len(stable_nodes),
+            'high_confidence': len(high_confidence_nodes),
+            'ratio': len(stable_nodes) / config.evaluation.top_k if config.evaluation.top_k > 0 else 0.0
+        },
+        'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    }
+    
+    summary_path = os.path.join(output_dir, "multi_seed_summary.json")
+    with open(summary_path, 'w', encoding='utf-8') as f:
+        json.dump(summary, f, indent=2, ensure_ascii=False)
+    logging.info(f"✅ 汇总报告已保存: {summary_path}")
+    
+    # ==================== 4. 打印汇总表格 ====================
+    logging.info("\n" + "=" * 60)
+    logging.info("📊 多 Seed 稳定性汇总")
+    logging.info("=" * 60)
+    logging.info(f"运行 Seeds: {seeds}")
+    logging.info(f"Top-K: {config.evaluation.top_k}")
+    logging.info("")
+    logging.info("Jaccard 相似度 (Mean ± Std):")
+    logging.info(f"  融合模型: {avg_jaccard_fused:.3f} ± {jaccard_matrix_fused[np.triu_indices(n_seeds, k=1)].std():.3f}")
+    logging.info(f"  图模型:   {avg_jaccard_graph:.3f} ± {jaccard_matrix_graph[np.triu_indices(n_seeds, k=1)].std():.3f}")
+    logging.info(f"  表格模型: {avg_jaccard_tabular:.3f} ± {jaccard_matrix_tabular[np.triu_indices(n_seeds, k=1)].std():.3f}")
+    logging.info("")
+    logging.info("稳定异常节点:")
+    logging.info(f"  所有 seed 交集: {len(stable_nodes)} ({len(stable_nodes)/config.evaluation.top_k*100:.1f}%)")
+    logging.info(f"  高置信 (≥{n_seeds-1}/{n_seeds}): {len(high_confidence_nodes)} ({len(high_confidence_nodes)/config.evaluation.top_k*100:.1f}%)")
+    logging.info("=" * 60)
 
 
 if __name__ == "__main__":

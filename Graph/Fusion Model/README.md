@@ -50,9 +50,35 @@ python run_preprocess.py --data ../graph_main/raw_data/xxx.csv --output ./proces
 
 ### 3. 模型训练
 
+#### 单 Seed 模式（默认）
+
 ```bash
 python run_training.py --processed-data ./processed_data --output ./output
 ```
+
+#### 多 Seed 模式（稳定性验证）
+
+修改 `configs/training_config.py`：
+
+```python
+@dataclass
+class TrainingMainConfig:
+    # ...
+    enable_multi_seed: bool = True  # 启用多 seed 模式
+    seeds: List[int] = [42, 123, 456, 789, 2024]  # 配置多个种子
+```
+
+然后运行训练：
+
+```bash
+python run_training.py --processed-data ./processed_data --output ./output_multi_seed
+```
+
+**多 Seed 模式会自动生成：**
+- 每个 seed 的独立结果 → `output/seed_42/`, `output/seed_123/`, ...
+- Jaccard 相似度矩阵 → `output/jaccard_similarity.csv`
+- 稳定异常节点列表 → `output/stable_anomalies.csv`（所有 seed 交集）
+- 汇总报告 → `output/multi_seed_summary.json`
 
 ### 4. 可视化分析
 
@@ -69,6 +95,8 @@ Fusion Model/
 ├── README.md                       # 本文档
 ├── BUGFIX_P3.md                   # 修复记录 (OOV映射/除零/对齐检查)
 ├── REMOVAL_WEAK_RULES.md          # 功能移除记录 (弱规则)
+├── MULTI_SEED_GUIDE.md            # 🔥 多 Seed 模式完整指南
+├── MULTI_SEED_EXAMPLES.md         # 🔥 多 Seed 配置示例
 │
 ├── run_preprocess.py              # 预处理脚本
 ├── run_training.py                # 训练脚本
@@ -196,8 +224,22 @@ python run_training.py \
 ```
 
 **输出文件**:
-- `fusion_scores.csv` - 融合分数 (graph/tabular/fusion)
-- `top_1000_anomalies.csv` - Top-K 异常交易
+- `fusion_scores.csv` - **所有边**的融合分数
+  - `graph_score`: 图模型分数
+  - `tabular_score`: 表格模型分数
+  - `fused_score`: 融合后分数
+  - `fusion_weight`: 融合权重 α (门控融合时有值)
+  
+- `top_1000_anomalies.csv` - **Top-K 异常交易**（包含完整交易信息）
+  - 原始数据所有字段（含 `debit_account_masked`, `bene_account_masked` 等）
+  - `rank`: 异常排名 (1~K)
+  - `fused_score`: 融合分数
+  - `graph_score`: 图模型分数
+  - `tabular_score`: 表格模型分数
+  - `fusion_weight`: 融合权重 α (门控融合时)
+  - `node_degree_proxy`: 活跃度代理 = min(src_out_degree, dst_in_degree)
+    - **用于解释为什么更信图/表**: 度数越高 → α 越大 → 更信任图模型
+  
 - `training_results.pkl` - 完整结果 (可视化用)
 - `training_report.txt` - 训练报告
 - `graph_model.pt` / `tabular_model.pkl` - 模型权重 (可选)
@@ -223,4 +265,70 @@ python run_visualization.py \
 5. **综合报告**: 4x3 拼接大图
 
 ---
+
+## 配置说明
+
+### 多 Seed 稳定性验证
+
+修改 `configs/training_config.py` 启用多 seed 模式：
+
+```python
+@dataclass
+class TrainingMainConfig:
+    # ...
+    enable_multi_seed: bool = True  # 启用多 seed 模式
+    seeds: List[int] = [42, 123, 456, 789, 2024]  # 配置多个种子
+```
+
+**多 Seed 输出结构**：
+```
+output_multi_seed/
+├── seed_42/                      # 每个 seed 独立结果
+│   ├── fusion_scores.csv
+│   ├── top_1000_anomalies.csv
+│   └── training_results.pkl
+├── seed_123/
+├── seed_456/
+├── ...
+│
+├── jaccard_similarity.csv        # 🔥 跨 Seed Jaccard 相似度矩阵
+├── stable_anomalies.csv          # 🔥 所有 seed 都识别的异常
+└── multi_seed_summary.json       # 🔥 稳定性汇总报告
+```
+
+#### 稳定性指标解读
+
+**1. Jaccard 相似度** (`jaccard_similarity.csv`)
+
+| seed_i | seed_j | jaccard_fused | jaccard_graph | jaccard_tabular |
+|--------|--------|---------------|---------------|-----------------|
+| 42     | 123    | 0.856         | 0.823         | 0.901           |
+| 42     | 456    | 0.871         | 0.845         | 0.889           |
+
+- **0.7~0.9**: 模型稳定可靠 ✅
+- **0.5~0.7**: 中等稳定，可使用
+- **<0.5**: 对初始化敏感，需调参 ⚠️
+
+**2. 稳定节点列表** (`stable_anomalies.csv`)
+
+列出所有 seed 都识别的高置信度异常（Top-K 交集），**优先人工审核**
+
+**3. 汇总报告** (`multi_seed_summary.json`)
+
+```json
+{
+  "stable_nodes": {
+    "all_seeds": 678,
+    "ratio": 0.678
+  }
+}
+```
+
+- **Stable Ratio > 0.6**: 高置信度，可直接使用
+- **0.4~0.6**: 建议人工复核
+- **< 0.4**: 需要更多数据或调整模型
+
+---
+
+## 常见问题
 
