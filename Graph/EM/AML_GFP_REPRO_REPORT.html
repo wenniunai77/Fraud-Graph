@@ -988,6 +988,28 @@
               </div>
             </div>
           </article>
+
+          <article class="card" style="margin-top: 18px;">
+            <h3>1.3 原始字段详细说明</h3>
+            <table class="data-table">
+              <thead>
+                <tr><th>字段名</th><th>字段含义说明</th><th>样例</th></tr>
+              </thead>
+              <tbody>
+                <tr><td><code>Timestamp</code></td><td>交易发生时间。CSV 使用 <code>YYYY/MM/DD HH:MM</code> 格式；特征工程会将其解析为时间戳并按时间排序。</td><td><code>2022/09/01 00:20</code></td></tr>
+                <tr><td><code>From Bank</code></td><td>转出方银行 ID。交易图建模中账户为节点，交易是从源账户指向目标账户的有向边。</td><td><code>010</code></td></tr>
+                <tr><td><code>Account</code></td><td>转出方/源账户 ID。CSV 中源账户和目标账户列都叫 <code>Account</code>，Pandas 读取时第一列保留原名。</td><td><code>8000EBD30</code></td></tr>
+                <tr><td><code>To Bank</code></td><td>转入方/目标账户所在银行的银行 ID。</td><td><code>010</code></td></tr>
+                <tr><td><code>Account.1</code></td><td>转入方/目标账户 ID。Pandas 将 CSV 中第二个同名 <code>Account</code> 自动命名为 <code>Account.1</code>。</td><td><code>8000EBD30</code></td></tr>
+                <tr><td><code>Amount Received</code></td><td>收款方实际收到的金额，计价单位由 <code>Receiving Currency</code> 指定。</td><td><code>3697.34</code></td></tr>
+                <tr><td><code>Receiving Currency</code></td><td>收款金额的币种，如 <code>US Dollar</code>、<code>Euro</code>、<code>Yuan</code>、<code>Bitcoin</code> 等。</td><td><code>US Dollar</code></td></tr>
+                <tr><td><code>Amount Paid</code></td><td>付款方实际支付的金额，计价单位由 <code>Payment Currency</code> 指定。</td><td><code>3697.34</code></td></tr>
+                <tr><td><code>Payment Currency</code></td><td>付款金额的币种。</td><td><code>US Dollar</code></td></tr>
+                <tr><td><code>Payment Format</code></td><td>交易渠道或支付类型，如 <code>ACH</code>、<code>Bitcoin</code>、<code>Cash</code>、<code>Cheque</code>、<code>Credit Card</code>、<code>Reinvestment</code>、<code>Wire</code>。</td><td><code>Reinvestment</code></td></tr>
+                <tr><td><code>Is Laundering</code></td><td>标签列：标记该交易是否为洗钱/欺诈交易（1 = 是，0 = 否）。</td><td><code>0</code></td></tr>
+              </tbody>
+            </table>
+          </article>
         </section>
 
         <section id="section-2" class="section">
@@ -1166,9 +1188,91 @@
             </div>
           </article>
 
+          <article class="card" style="margin-top: 18px;">
+            <h3>3.3 从异常资金流转阶段看 GFP</h3>
+            <p>
+              在欺诈检测场景中，异常资金流转通常可以理解为三个阶段：<strong>Placement</strong> 是异常资金进入金融系统，<strong>资金转移与混淆</strong>（Layering）是通过多账户、多路径、多时间窗口转移来隐藏来源与切断追溯链路，<strong>Integration</strong> 是资金流向看似正常的消费、投资或经营活动中。
+            </p>
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>阶段</th>
+                  <th>交易图上的典型痕迹</th>
+                  <th>当前特征工程</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Placement</td>
+                  <td>异常资金从少数来源账户进入系统，可能表现为短时间内异常入账、金额分布突变、跨银行或跨币种进入。</td>
+                  <td>基础交易特征覆盖金额、币种、银行和支付方式；<code>vertex_stats</code> 在 1 天窗口内补充源点/终点活跃度、时间密度和金额统计，因此能感知"新进入资金是否改变账户近期行为"。但若无实体类型或账户性质等业务字段，进入阶段的语义只能被间接刻画。</td>
+                </tr>
+                <tr>
+                  <td>资金转移与混淆<br><small>（Layering）</small></td>
+                  <td>资金被拆分、汇聚、绕转、回流，形成扇出/扇入、scatter-gather、环、随机游走、二部图或多层二部图等子图结构。这是欺诈链条中最核心的隐蔽手段。</td>
+                  <td>这是当前 GFP 覆盖最强的阶段：<code>scatter-gather</code> 捕捉 6 小时内的拆分-归集，<code>temp-cycle</code> 与 <code>lc-cycle</code> 捕捉 1 天内的短时闭环和最长 10 跳循环，<code>vertex_stats</code> 捕捉异常枢纽账户。图专家再通过 PNA 聚合交易边周围的多跳关系上下文。</td>
+                </tr>
+                <tr>
+                  <td>Integration</td>
+                  <td>资金流向看似正常的收款方、消费、供应链、投资或经营支付，图上更像"异常路径之后的正常出口"。</td>
+                  <td>当前特征能通过目标账户近期入账/出账统计、支付方式、币种、同银行关系和图上下文捕捉部分出口行为；PNA 的边级上下文有助于识别"前序链路异常但当前交易表面正常"的边。限制在于：若没有商户类别、实体所有权、业务关系等字段，退出阶段的业务语义仍主要依赖图结构间接表达。</td>
+                </tr>
+              </tbody>
+            </table>
+          </article>
+
+          <article class="card" style="margin-top: 18px;">
+            <h3>3.4 八类典型欺诈子图模式与当前特征覆盖</h3>
+            <p>
+              常见欺诈交易模式可以抽象为 8 类交易子图。这些模式在洗钱、套现、虚假交易等多种欺诈类型中均有出现。当前实现更像“模式证据提取器”：对可直接计算的结构显式提取，对需要更高阶语义或更长路径的结构交给统计特征和图专家补足。
+            </p>
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>模式</th>
+                  <th>子图结构</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Fan-out</td>
+                  <td>一个账户向多个不同账户转出。</td>
+                </tr>
+                <tr>
+                  <td>Fan-in</td>
+                  <td>多个不同账户向同一账户转入。</td>
+                </tr>
+                <tr>
+                  <td>Gather-scatter</td>
+                  <td>多个来源先汇聚到中心账户，再由该中心账户向多个目标散出。</td>
+                </tr>
+                <tr>
+                  <td>Scatter-gather</td>
+                  <td>一个来源拆分到多个中间账户，再从这些中间账户归集到一个目标账户。</td>
+                </tr>
+                <tr>
+                  <td>Simple cycle</td>
+                  <td>资金沿一条简单路径绕转后回到起点账户。</td>
+                </tr>
+                <tr>
+                  <td>Random</td>
+                  <td>资金在受控账户间随机多跳转移，不一定回到起点。</td>
+                </tr>
+                <tr>
+                  <td>Bipartite</td>
+                  <td>一组输入账户向一组输出账户转移，形成多对多二部结构。</td>
+                </tr>
+                <tr>
+                  <td>Stack</td>
+                  <td>在二部结构上再叠加一层或多层中间账户，形成多层资金通道。</td>
+                </tr>
+              </tbody>
+            </table>
+          </article>
+
           <div class="subgrid" style="margin-top: 18px;">
             <article class="card">
-              <h3>3.3 GFP 的输入信息范围</h3>
+              <h3>3.5 GFP 的输入信息范围</h3>
               <div class="pill-cloud">
                 <span class="scope-pill">源账户 / 目标账户</span>
                 <span class="scope-pill">金额原值 / 对数值</span>
@@ -1183,7 +1287,7 @@
             </article>
 
             <article class="card">
-              <h3>3.4 最终表格中包含什么</h3>
+              <h3>3.6 最终表格中包含什么</h3>
               <div class="stack">
                 <span class="stack-pill">基础样本字段</span>
                 <span class="stack-pill">数据切分标记</span>
@@ -1767,7 +1871,7 @@
               <tbody>
                 <tr>
                   <td>GNN warmup</td>
-                  <td><code>gnn_warmup_epochs=2</code></td>
+                  <td><code>gnn_warmup_epochs=10</code></td>
                   <td>先用 train gold labels 训练图专家，降低冷启动噪声。</td>
                 </tr>
                 <tr>
@@ -1815,7 +1919,7 @@
 
           <div class="quote-card">
             <blockquote>
-              针对反洗钱交易识别任务，构建了一套严格遵循时序切分的边级检测流程。系统先基于交易属性与图结构生成工程化特征，再分别训练表格专家和图专家，其中表格专家擅长刻画单笔交易属性模式，图专家擅长建模账户间资金流动关系。两者通过 Co-EM 机制交换软标签与关系表示，并在验证集上完成校准、阈值选择与融合权重选择，最终以 AUPRC 为主指标评估在未来时间窗口上的泛化能力。
+              针对欺诈交易检测任务，构建了一套严格遵循时序切分的边级检测流程。系统先基于交易属性与图结构生成工程化特征，再分别训练表格专家和图专家，其中表格专家擅长刻画单笔交易属性模式，图专家擅长建模账户间资金流动关系。两者通过 Co-EM 机制交换软标签与关系表示，并在验证集上完成校准、阈值选择与融合权重选择，最终以 AUPRC 为主指标评估在未来时间窗口上的泛化能力。
             </blockquote>
             <p>整体设计强调三点：严格时序评估、图表互补建模，以及在验证集约束下完成校准、协同与融合。</p>
           </div>
