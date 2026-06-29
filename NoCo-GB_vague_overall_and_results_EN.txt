@@ -1,0 +1,87 @@
+Algorithm Overview and Current Experimental Results
+
+1. Overall Idea
+
+The overall goal is to address open-set graph anomaly detection by improving the model's ability to capture normal graph patterns rather than relying primarily on the limited anomaly types observed during training. In this setting, the training data contains a small number of seen anomalies, while the test data contains both seen and unseen anomalies. A model that overfits to the seen anomaly types may fail when the anomaly distribution changes.
+
+The general idea is to learn a normality-oriented graph representation and scoring mechanism. The model is encouraged to characterize regular attribute and structural patterns in the graph, and nodes that are less consistent with these learned normal patterns are assigned higher anomaly scores. The same scoring principle is applied to both seen and unseen anomalies, so the inference procedure does not depend on whether a test anomaly belongs to a known anomaly type.
+
+This formulation can be interpreted as an open-set risk control strategy. Instead of treating the observed anomaly labels as a complete description of the anomaly space, the method emphasizes the modeling of normal graph behavior and uses deviations from normality as the basis for anomaly detection.
+
+2. Datasets and Protocols
+
+The current experiments cover Photo, Computers, CS, ogbn-arxiv, and YelpChi.
+
+Photo, Computers, and CS are multi-class graph datasets. The experiments follow the nsreg_multiclass protocol, where low-frequency classes are treated as anomaly classes and high-frequency classes are treated as normal classes. In each trial, one anomaly class is selected as the seen anomaly class, and the remaining anomaly classes are treated as unseen anomaly classes.
+
+ogbn-arxiv is a large-scale OGB citation graph with about 169K nodes, 1.17M edges, 128-dimensional node features, and 40 classes. The experiment selects low-frequency classes with proportions between 3% and 5% as anomaly classes. The selected candidate anomaly classes are [4, 8, 10, 34], and each class is rotated as the seen anomaly class.
+
+YelpChi is a binary fraud detection dataset and does not contain natural anomaly subclasses. Therefore, the current Yelp experiment uses locally constructed anomaly subclasses. These results should be interpreted only as a protocol pressure test and should not be claimed as officially comparable SOTA results.
+
+3. Current Main Experimental Results
+
+3.1 Results on Photo, Computers, and CS
+
+Under the PyG multi-class protocol, the averaged results over 16 trials are as follows:
+
+Method	All AUROC	All AUPRC	Unseen AUROC	Unseen AUPRC	Unseen FNR
+Supervised GCN	0.7651	0.5674	0.6713	0.3426	0.9324
+GAE-GCN feat+edge	0.6420	0.2842	0.6304	0.2487	0.3735
+NoCo-GB feature+edge	0.7283	0.3852	0.6661	0.2775	0.5669
+NoCo-GB feature+edge + normal-pair	0.7637	0.4618	0.7010	0.3025	0.5756
+NoCo-GB code+feature+edge + normal-pair	0.7963	0.5464	0.7357	0.3352	0.6081
+
+These results show that the final NoCo-GB variant achieves the strongest performance among the compared internal variants. It improves All AUROC from 0.7283 to 0.7963 and Unseen AUROC from 0.6661 to 0.7357 compared with the feature+edge version.
+
+3.2 Comparison with Table 1 of the NSReg paper on the three small datasets
+
+Method	All AUROC	Unseen AUROC	Method Type
+BWGNN	0.740	0.666	Supervised GAD
+DCI	0.770	0.697	Supervised GAD
+AMNet	0.772	0.690	Supervised GAD
+PMP	0.778	0.682	Supervised GAD
+BCE	0.795	0.726	Supervised classification baseline
+NoCo-GB	0.8132	0.7627	Residual scoring, not a supervised classifier
+NSReg	0.887	0.847	Normal structure regularization
+
+NoCo-GB outperforms BWGNN, DCI, AMNet, PMP, and BCE on the three-dataset average, but it is still below NSReg itself. The current gap is about 0.07 in All AUROC and 0.08 in Unseen AUROC.
+
+3.3 Compatibility results on native NSReg data and splits
+
+Dataset	Split Source	Trials	All AUROC	Unseen AUROC	Unseen AUPRC
+Photo	raw npz + torch split	5	0.8544	0.7430	0.1366
+Computers	raw npz + torch split	5	0.7935	0.7540	0.3944
+CS	raw npz + official recorded split	8	0.7917	0.7911	0.5002
+Average	-	-	0.8132	0.7627	0.3437
+
+These results show that NoCo-GB can run under stricter native NSReg data and split settings while maintaining stable open-set detection performance. CS achieves an Unseen AUROC of 0.7911. Photo has an Unseen AUPRC of 0.1366, indicating that precision remains limited under low anomaly-rate conditions.
+
+3.4 Results on ogbn-arxiv
+
+Metric	DEMO Paper Arxiv	NoCo-GB code-only	NoCo-GB code+edge final
+All AUROC	0.6364	0.6772	0.6870
+All AUPRC	0.3329	0.3413	0.3367
+Unseen AUROC	0.5643	0.6087	0.6251
+Unseen AUPRC	0.1808	0.1726	0.1817
+
+On ogbn-arxiv, the final code+edge version achieves All AUROC 0.6870, Unseen AUROC 0.6251, and Unseen AUPRC 0.1817. Compared with the public DEMO paper arxiv target, NoCo-GB improves All AUROC and Unseen AUROC, and it slightly exceeds the Unseen AUPRC target.
+
+The per-unseen-class AUROC results are:
+
+Unseen Class	NoCo-GB code-only	NoCo-GB code+edge
+Class 4	0.7417	0.7487
+Class 8	0.6012	0.6514
+Class 10	0.5903	0.6004
+Class 34	0.5332	0.5359
+
+Class 34 is the most difficult unseen class, with AUROC around 0.53 to 0.54. The code+edge variant improves Class 8 most significantly, from 0.6012 to 0.6514.
+
+3.5 YelpChi local pressure test
+
+Metric	DEMO Paper Yelp	Local Best
+All AUROC	0.7097	0.6394
+All AUPRC	0.2238	0.2300
+Unseen AUROC	0.7235	0.6403
+Unseen AUPRC	0.0635	0.1948
+
+The current YelpChi results are not officially comparable because the local dummy labels differ from the official protocol. These results only show that the algorithm can run on a locally constructed open-set pressure test from a binary fraud dataset. The AUROC is still lower than the Yelp numbers reported by the DEMO paper.
